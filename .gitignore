@@ -1,0 +1,8 @@
+build/
+.vscode/
+.idea/
+*.out
+*.o
+*.a
+*.so
+*.dylib
