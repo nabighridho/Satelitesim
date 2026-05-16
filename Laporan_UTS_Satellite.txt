@@ -1,0 +1,1011 @@
+LAPORAN PROYEK AKHIR
+GRAFIKA KOMPUTER
+ 
+Nabigh Nailur Ridho
+240533608084
+ 
+(OFFERING C)
+ 
+UNIVERSITAS NEGERI MALANG
+FAKULTAS TEKNIK 
+PROGRAM STUDI PENDIDIKAN TEKNIK INFORMATIKA
+2026
+
+LABORATORIUM KOMPUTER
+DTEI FT - Universitas Negeri Malang
+Gedung B11 Lantai 2, Malang, Jawa Timur
+ 
+Nama                : Nabigh Nailur Ridho
+NIM                 : 240533608084
+Prodi               : S1 Pendidikan Teknik Informatika
+Dosen Pembimbing    : Ir. Azhar Ahmad Smaragdina, M.Pd.
+Asisten Praktikum   : Tegar Fatur Rachman
+ 
+====================================================================
+PROYEK: SATELLITE SIMULATOR (SISTEM TATA SURYA & ORBIT SATELIT)
+====================================================================
+
+A. Deskripsi Proyek & Kode Utama
+
+Proyek "Satellite Simulator" merupakan simulasi 3D interaktif yang menampilkan Bumi beserta tiga satelit (Aqua, ICESat-2, dan Landsat 8) yang mengorbit dengan perhitungan kecepatan dan inklinasi yang mendekati riil. Simulasi ini dibangun di atas OpenGL dan C++ dengan memanfaatkan GLM untuk kalkulasi matriks kompleks. Keseluruhan aplikasi diatur melalui mekanisme State Machine (Mesin Status) dalam loop perenderan.
+
+Berikut adalah pondasi utama pada `main.cpp` yang berfungsi sebagai pengontrol siklus hidup simulasi:
+
+// ====================================================================
+// Kode Utama (main.cpp)
+// ====================================================================
+
+#include "SatelliteScene.h"
+#include "Camera.h"
+#include "Window.h"
+#include "Renderer.h"
+#include "InfoPanel.h"
+#include "Starfield.h"
+#include "MainMenu.h"
+#include <cstdio>
+
+enum AppState { STATE_MENU, STATE_GAME };
+static AppState g_appState = STATE_MENU;
+static bool g_mouseClicked = false;
+static double g_clickX = 0, g_clickY = 0;
+
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS && g_appState == STATE_MENU) {
+        glfwGetCursorPos(window, &g_clickX, &g_clickY);
+        g_mouseClicked = true;
+    }
+}
+
+int main() {
+    Window window;
+    enableDebugging();
+
+    Camera camera(window);
+    glfwSetCursorPosCallback(window.p_GLFWwindow(), Camera::mouse_callback);
+    glfwSetScrollCallback(window.p_GLFWwindow(), Camera::scroll_callback);
+    glfwSetMouseButtonCallback(window.p_GLFWwindow(), mouse_button_callback);
+    glfwSetWindowUserPointer(window.p_GLFWwindow(), &camera);
+
+    Shader phongShader("../res/shaders/phong.vert", "../res/shaders/phong.frag");
+    SatelliteScene scene;
+    InfoPanel infoPanel(window.getWidth(), window.getHeight());
+    Starfield starfield(2500);
+    MainMenu mainMenu(window.getWidth(), window.getHeight());
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    window.showCursor();
+    float lastFrame = 0.0f;
+
+    while (!glfwWindowShouldClose(window.p_GLFWwindow())) {
+        float currentFrame = (float)glfwGetTime();
+        float dt = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+
+        glClearColor(0.01f, 0.01f, 0.04f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        if (g_appState == STATE_MENU) {
+            starfield.render(camera, currentFrame);
+            scene.update(dt * 0.3f); 
+            scene.render(phongShader, camera);
+            
+            double mx, my;
+            glfwGetCursorPos(window.p_GLFWwindow(), &mx, &my);
+            mainMenu.update(dt, (float)mx, (float)my);
+
+            if (g_mouseClicked) {
+                g_mouseClicked = false;
+                MenuAction action = mainMenu.handleClick((float)g_clickX, (float)g_clickY);
+                if (action == MENU_PLAY) {
+                    g_appState = STATE_GAME;
+                    window.hideCursor();
+                    camera.resetToEarthView();
+                    scene.resetAll();
+                } else if (action == MENU_QUIT) {
+                    glfwSetWindowShouldClose(window.p_GLFWwindow(), true);
+                }
+            }
+            mainMenu.render(currentFrame);
+        } else {
+            camera.processKeyboardInput(window.p_GLFWwindow());
+            starfield.render(camera, currentFrame);
+            scene.update(dt);
+            scene.render(phongShader, camera);
+            scene.renderMinimap(camera, window.getWidth(), window.getHeight());
+            
+            SatInfo info = scene.getSelectedInfo();
+            infoPanel.render(title, status);
+        }
+
+        glfwSwapBuffers(window.p_GLFWwindow());
+        glfwPollEvents();
+    }
+    return 0;
+}
+
+
+B. Alur Program, Pergerakan 3D, dan Penjelasan Fitur Lengkap
+
+Simulasi ini menyajikan detail grafika kompleks dari elemen terkecil hingga terbesar. Berikut ini adalah pembedahan fitur dari tahapan menu, logika fisika lintasan satelit, manipulasi visual shader, hingga penutupan sistem (terminasi), yang disajikan secara terperinci.
+
+
+1. Inisialisasi Jendela dan Konteks Grafis OpenGL
+Source code (Window.cpp):
+```cpp
+Window::Window() : width(1280), height(720) {
+    glfwInit();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+    window = glfwCreateWindow(width, height, "Satellite Simulation", NULL, NULL);
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1); // V-Sync
+    gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
+}
+```
+Penjelasan:
+Ketika program dieksekusi, konstruktor `Window` adalah yang pertama kali dipanggil. Ia bertugas "membangunkan" library GLFW yang berkomunikasi dengan sistem operasi Windows untuk meminta alokasi ruang kanvas layar berukuran 1280x720. Di sini spesifikasi grafis ditentukan ke OpenGL Versi 3.3 dalam profil Core, untuk menjamin program berjalan dalam standar instruksi modern tanpa elemen lawas pendahulu. Fungsi `glfwMakeContextCurrent` lalu mengikat aliran data GPU ke kanvas ini. Terakhir, pengikatan alamat fungsi perangkat keras (*function pointers*) direalisasikan melalui GLAD. Tanpa GLAD, instruksi OpenGL tidak akan dikenali oleh kartu grafis yang dipakai.
+
+
+2. Rendering Layar Antarmuka Main Menu (Landing Page)
+Source code (MainMenu.cpp):
+```cpp
+bool MainMenu::isMouseOver(float mx, float my, float x, float y, float w, float h) {
+    return (mx >= x && mx <= x + w && my >= y - h && my <= y);
+}
+
+void MainMenu::update(float dt, float mouseX, float mouseY) {
+    time += dt;
+    isPlayHovered = isMouseOver(mouseX, mouseY, startBtnX, startBtnY, startBtnW, startBtnH);
+    isQuitHovered = isMouseOver(mouseX, mouseY, quitBtnX, quitBtnY, quitBtnW, quitBtnH);
+}
+```
+Penjelasan:
+Pada *Landing Page*, kita perlu menampilkan tulisan START dan QUIT. Teks ini tidak dirender menggunakan matriks proyeksi *Perspective* (seperti benda 3D), melainkan dengan proyeksi *Orthographic* khusus 2D yang menimpa langsung kaca layar layaknya sebuah stiker. Saat menu ditampilkan, kursor mouse sengaja diaktifkan ulang oleh GLFW. Program lalu secara konstan menyuplai letak XY kursor kepada metode `isMouseOver`. Metode ini menggunakan sistem Axis-Aligned Bounding Box (AABB) dua dimensi. Ia menguji apakah angka posisi kursor sedang terjebak di antara angka batas atas, bawah, kiri, dan kanan dari tulisan tombol. Jika bernilai benar (Hovered), warna tombol dalam *render routine* akan diubah menjadi lebih bersinar kebiruan untuk merespons interaksi visual dari pengguna.
+
+
+3. Estetika Layar Latar Main Menu (Slow Motion Cinematic)
+Source code (main.cpp):
+```cpp
+if (g_appState == STATE_MENU) {
+    // Merender bintang terlebih dahulu
+    starfield.render(camera, currentFrame);
+    
+    // Pembaruan waktu dimanipulasi
+    scene.update(dt * 0.3f); 
+    scene.render(phongShader, camera);
+}
+```
+Penjelasan:
+Sebagai menu yang mewah secara visual, menu tidak berdiri diam. Kamera diletakkan terkunci memandang Bumi. Kemudian, fungsi kalkulasi fisika `scene.update()` yang bertugas memutar planet dan menggeser letak seluruh satelit tetap dijalankan secara aktif. Trik kuncinya berada pada argumen interval waktu (*delta time* atau dt) yang sengaja dikalikan dengan bobot desimal `0.3f`. Operasi matematika ini memangkas 70% dari kecepatan asli kejadian, sehingga menghasilkan ilusi pergerakan sangat pelan (*Slow Motion*), menghadirkan suasana dramatis nan sinematik sebagai latar belakang ruang menu tanpa merusak konstanta hukum laju satelit yang asli.
+
+
+4. Transisi Status dan Pemulihan Orientasi Kamera
+Source code (main.cpp & Camera.cpp):
+```cpp
+// Dalam blok klik MENU_PLAY
+g_appState = STATE_GAME;
+window.hideCursor();
+camera.resetToEarthView();
+scene.resetAll();
+
+// Metode resetToEarthView di Camera.cpp
+void Camera::resetToEarthView() {
+    chaseMode = false;
+    firstMouse = true;
+    cameraPos = glm::vec3(0.0f, 15.0f, 45.0f);
+    cameraFront = glm::normalize(glm::vec3(0.0f) - cameraPos);
+    yaw = glm::degrees(atan2f(cameraFront.z, cameraFront.x));
+    pitch = glm::degrees(asinf(cameraFront.y));
+    view = glm::lookAt(cameraPos, glm::vec3(0.0f), cameraUp);
+}
+```
+Penjelasan:
+Sekalinya pengguna mengeklik tombol START, variabel pemicu status aplikasi berpindah secara absolut dari `STATE_MENU` ke `STATE_GAME`. Secara serentak, kursor mouse menghilang agar pengguna bisa berfokus pada kontrol kamera 3D tanpa diganggu penunjuk putih. Kamera kemudian di-reset posisinya. Alasan dipanggilnya metode trigonometri `atan2f` dan `asinf` di sini adalah untuk merekalkulasi dua nilai krusial dari *Yaw* (Tengokan ke samping) dan *Pitch* (Tengokan Atas Bawah). Perhitungan invers *Sine* dan *Tangent* ini memastikan orientasi titik pusat (*Crosshair*) kamera berpedoman tepat lurus menatap ekuator Bumi tanpa mengalami lompatan liar (sudden snaps) yang biasa terjadi akibat riwayat gerakan mouse yang terekam liar selama navigasi pada masa menu.
+
+
+5. Rendering Bintang Angkasa Prosedural Tak Terhingga
+Source code (Starfield.cpp):
+```cpp
+void Starfield::render(const Camera& camera, float time) {
+    glDepthMask(GL_FALSE);
+    shader.bind();
+    
+    // Potong translasi matriks menjadi mat3
+    glm::mat4 view = glm::mat4(glm::mat3(camera.getViewMatrix())); 
+    shader.setUniformMatrix4fv("u_view", view);
+    shader.setUniformMatrix4fv("u_projection", camera.getProjection());
+    shader.setUniform1f("u_time", time);
+
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    glBindVertexArray(VAO);
+    glDrawArrays(GL_POINTS, 0, starCount);
+}
+```
+Penjelasan:
+Program menghindari penggunaan model latar kubus gambar (Skybox Bitmap) berukuran berat dan menggantinya dengan generasi prosedural vertex 2500 primitif poin tunggal (`GL_POINTS`). Untuk memberikan kesan kedalaman luar angkasa yang amat masif tanpa batas, metode *Depth Buffer Writing* (`glDepthMask`) diblokir sementara agar bintang berada murni secara kosmetik di balik seluruh benda material scene. Teknik utamanya ada pada pemotongan komponen translasi matriks kamera dari 4x4 menjadi 3x3. Pemotongan baris vektor pergeseran spasial ini menjadikan tumpukan titik bintang hanya terpengaruh oleh aksi toleh/putar dari pandangan kamera, tetapi takkan pernah bisa didekati (karena sumbu X, Y, Z kameranya dicabut). Inilah yang menciptakan ilusi *Infinity Parallax Depth* dari jagat raya.
+
+
+6. Rotasi Bumi dan Pencahayaan Shading Model Phong
+Source code (SatelliteScene.cpp & phong.frag):
+```cpp
+// Dalam update() - Merotasi Bumi
+earthAngle += earthRotationSpeed * deltaTime * timeScale;
+glm::mat4 earthModel = glm::mat4(1.0f);
+earthModel = glm::rotate(earthModel, earthAngle, glm::vec3(0.0f, 1.0f, 0.0f));
+
+// Dalam phong.frag - Pencahayaan Spesikular
+vec3 viewDir = normalize(u_viewPos - FragPos);
+vec3 reflectDir = reflect(-lightDir, normal);
+float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+vec3 specular = 0.5 * spec * vec3(1.0, 1.0, 1.0);
+```
+Penjelasan:
+Bumi didirikan persis pada koordinat origin `(0.0, 0.0, 0.0)`. Planet ini bukanlah objek diam, matriks model bumi (earthModel) dikalikan terus-menerus dengan laju sudut yang disumbangkan oleh *delta time* pada Sumbu Y tegak (0, 1, 0), sehingga globe tersebut berputar mensimulasikan pergantian hari. Penambahan grafis ditunjang oleh program *Fragment Shader Phong*, di mana sifat pencahayaan permukaan direkayasa dari gabungan pantulan difus dan kilau spekular. Rumus `reflect` dikalkulasi antara sinar pantulan balik lampu (Matahari) dan posisi pandangan mata pengguna. Bumi akan memantulkan noda cahaya keperakan (highlight) di daerah lautannya, menyajikan tekstur realistis pemodelan planet tiga dimensi.
+
+
+7. Lapisan Sinar Atmosfer Bumi (Fresnel Rim Glow)
+Source code (atmosphere.frag):
+```glsl
+void main() {
+    vec3 viewDir = normalize(u_viewPos - FragPos);
+    float fresnel = dot(viewDir, normalize(Normal));
+    fresnel = clamp(1.0 - fresnel, 0.0, 1.0);
+    fresnel = pow(fresnel, 4.0); 
+
+    vec3 lightDir = normalize(u_lightDir);
+    float diffuse = max(dot(normalize(Normal), lightDir), 0.0);
+    
+    vec3 atmosColor = mix(vec3(0.02, 0.1, 0.3), vec3(0.4, 0.7, 1.0), diffuse);
+    FragColor = vec4(atmosColor, fresnel * 0.8 * (diffuse + 0.1));
+}
+```
+Penjelasan:
+Selain bola planet solidnya, sebuah bola tak bertekstur dengan rentang radius beberapa unit lebih raksasa ditumpukkan di titik yang sama secara semi-transparan mode Additive Blending. Di dalam mikrokontrolernya (Shader), shader ini mematuhi rasio hukum fisika *Fresnel Dot Product*. Sudut Normal (Arah tegak lurus lekukan bumi) di-skalarkan tehadap Sudut Penglihatan Kamera (View Direction). Jika keduanya tegak lurus satu sama lain (bernilai nol, artinya berada di pinggir bola), warna alpha Fresnel diinversikan mendekati maksimal (1.0). Ini membuat aura cahaya kebiruan hanya menebal sangat jelas menyala menyelimuti lengkungan kurva tepi bola dan lenyap transparan di bagian tegak lurus dada bola ke arah pengguna. Lapisan atmosfer ini juga secara cerdas diredupkan kepadatannya ketika terpapar di sisi yang miskin cahaya matahari (*night shadow side*).
+
+
+8. Formasi Jejak Garis Lintasan Orbit Melingkar
+Source code (SatelliteScene.cpp):
+```cpp
+for (int i = 0; i < (int)orbits.size(); i++) {
+    std::vector<float> lineVerts;
+    int segments = 100;
+    
+    // Kalkulasi Matriks Kemiringan Lintasan Dasar
+    glm::mat4 incMat = glm::rotate(glm::mat4(1.0f), glm::radians(orbits[i].inclination), glm::vec3(0, 0, 1));
+
+    for (int s = 0; s < segments; s++) {
+        float angle = (float)s / segments * glm::two_pi<float>();
+        float x = orbits[i].radius * cosf(angle);
+        float z = orbits[i].radius * sinf(angle);
+        glm::vec3 pos = glm::vec3(incMat * glm::vec4(x, 0.0f, z, 1.0f));
+        lineVerts.push_back(pos.x);
+        lineVerts.push_back(pos.y);
+        lineVerts.push_back(pos.z);
+    }
+    // Bind VBO & VAO
+}
+```
+Penjelasan:
+Untuk memvisualisasikan jalur rel cincin yang dilalui satelit di ruang hampa, program perlu me-rendernya terpisah dari entitas benda aslinya. Lintasan orbit digambar hanya satu kali saat *setup* inisialisasi menggunakan primitif penggambar garis lingkar tersambung (`GL_LINE_LOOP`). Sebanyak 100 titik dipecah kelilingnya membentuk lingkaran. Untuk merepresentasikan orbit dunia nyata yang membelah secara miring, titik orbit setiap satelit dikalikan lebih dahulu dengan Matriks Inklinasi (`incMat`) sehingga lingkarannya terotasi miring menembus sumbu Z sesuai derajat sudut peluncuran historisnya masing-masing. Ketika di-render, *shader uniform* alfa pada jejak ini dimodifikasi dinamis dari redup transparan menjadi tebal terang apabila sang satelit itu sedang disorot (Selected Mode).
+
+
+9. Dinamika Kinematika Translasi Satelit 3D
+Source code (SatelliteScene.cpp):
+```cpp
+void SatelliteScene::update(float deltaTime) {
+    for (int i = 0; i < (int)orbits.size(); i++) {
+        OrbitData &od = orbits[i];
+        
+        od.currentAngle += od.speed * deltaTime * timeScale;
+        
+        float x = od.radius * cosf(od.currentAngle);
+        float z = od.radius * sinf(od.currentAngle);
+        glm::vec3 rawPos = glm::vec3(x, 0.0f, z);
+
+        glm::mat4 incMat = glm::rotate(glm::mat4(1.0f), glm::radians(od.inclination), glm::vec3(0, 0, 1));
+        glm::vec3 finalPos = glm::vec3(incMat * glm::vec4(rawPos, 1.0f));
+        od.pos = finalPos;
+
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, finalPos);
+        model = glm::rotate(model, glm::radians(od.inclination), glm::vec3(0, 0, 1));
+        model = glm::rotate(model, -od.currentAngle, glm::vec3(0, 1, 0));
+        model = glm::scale(model, glm::vec3(od.scale));
+        
+        od.modelMatrix = model;
+    }
+}
+```
+Penjelasan:
+Kunci fundamental seluruh kinetik ruang benda 3D ada pada cuplikan modul di atas. Titik spasial mentah x dan z dihitung dari perkalian jarak jauh satelit (Radius) dengan sudutnya yang bervariasi setiap frame. Transformasi akhir sebuah benda grafika mutlak membutuhkan Matriks Model terpadu (Matrix 4x4) sebelum dilempar ke kartu grafis. Setelah memperoleh titik posisi ruang melingkarnya (yang juga sudah dikalikan dengan rotasi inklinasi Z agar letaknya presisi bertumpuk di atas rel `orbit trails`), model digeser (`translate`), lalu dirotasi ganda, pertama menunduk sesuai kemiringan rel, lalu membelok seiring sudut putarnya, menjamin desain model antena satelit konsisten menghadap ke laju putaran layaknya pesawat nyata. Barulah kemudian objek diperkecil (`scale`) agar relevan dengan ukuran proporsi simulasi jagat raya.
+
+
+10. Modifikasi Waktu Fleksibel (Time Controller)
+Source code (SatelliteScene.cpp):
+```cpp
+void SatelliteScene::increaseTimeScale() {
+    timeScale += 0.5f;
+    if (timeScale > 10.0f) timeScale = 10.0f;
+}
+
+void SatelliteScene::decreaseTimeScale() {
+    timeScale -= 0.5f;
+    if (timeScale < 0.0f) timeScale = 0.0f;
+}
+```
+Penjelasan:
+Pengguna dapat mempermainkan ritme fisika ruang angkasa dengan menekan tombol Plus (+) atau Minus (-) dan bahkan dapat menangguhkannya sepenuhnya via tombol (P) Pause. Semua variabel kecepatan pada seluruh elemen benda alam (Rotasi rotasi poros Bumi, dan putaran maju lintasan seluruh instansi satelit) secara mutlak dikalikan di ujung persamaannya dengan konstanta multiplier `timeScale`. Operasi ini secara seragam melipatgandakan dampak loncatan laju *delta time* (dt) tanpa mematahkan logika matematis posisinya.
+
+
+11. Mode Sudut Pandang Penjelajah (Free Fly Camera)
+Source code (Camera.cpp):
+```cpp
+void Camera::processKeyboardInput(GLFWwindow *window) {
+    if (chaseMode) return; // Mode bebas dinonaktifkan saat mengunci satelit
+
+    float speed = 8.0f * deltaTime;
+    glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += speed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= speed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= right * speed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += right * speed;
+
+    view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+}
+```
+Penjelasan:
+Mode bebas (Free Fly Mode) ini diizinkan selama pengguna tidak sedang membidik mengawasi satu satelit satupun. Logikanya berjalan seperti kerangka mekanik pergerakan orang pertama dalam desain permainan interaktif (First Person). Arah depan ditetapkan dengan vektor statis, sedangkan pergerakan geser samping *strafing* menyapu koordinat kiri (A) dan kanan (D) diturunkan secara brilian dengan mengeksploitasi fungsi matematika produk silang *Cross Product* dari penunjuk kamera ke depan dan garis pandu tegak lurus bumi (Up Vector), yang menghasilkan persis garis tegak lurus ke samping.
+
+
+12. Algoritma Fokus Interpolasi Mulus (Chase Camera Mode)
+Source code (Camera.cpp):
+```cpp
+if (chaseMode) {
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    glm::vec3 toTarget = glm::normalize(chaseTarget);
+    
+    // Tentukan titik Offset koordinat di belakang dan atas buritan
+    glm::vec3 offset = glm::normalize(toTarget) * 6.0f + glm::vec3(0.0f, 3.0f, 0.0f);
+    glm::vec3 desiredPos = chaseTarget + offset;
+
+    // Linear Interpolation (Lerp) untuk Smoothing Panning
+    float smoothSpeed = std::min(1.0f, 4.0f * deltaTime);
+    cameraPos += (desiredPos - cameraPos) * smoothSpeed;
+
+    view = glm::lookAt(cameraPos, chaseTarget, up);
+    return;
+}
+```
+Penjelasan:
+Ketika fokus ditarik ke sebuah sasaran (dengan menekan nomor urut 1, 2, atau 3), operasi kamera model pendaratan FPS di-bypass mutlak oleh segmen perulangan kode ini. Mesin mencari *Desired Position* alias posisi ideal bagi kameramen yang ditetapkan membuntuti statis di koordinat tepat enam satuan langkah dari buritan mesin dan tiga pilar menjulang di atapnya (Offset). Demi mencegah fenomena perpindahan mendadak posisi dunia yang membuat mual atau merusak ilusi (Jitter Snapping), `cameraPos` saat ini tidak langsung disamakan dengan tujuan. Pergeseran diinterpolasikan fraksional secara linier (Lerp - Linear Interpolation) setiap milidetiknya. Alhasil, lensa perlahan-lahan mengayun tergelincir masuk meluncur mulus menstabilkan letaknya, mengekor sasaran satelit secara natural seperti dalam karya rekam industri perfilman sinematik (Cinematic Camera Handling).
+
+
+13. Proyeksi Pemetaan Radar Sekunder (Picture-in-Picture Minimap)
+Source code (SatelliteScene.cpp):
+```cpp
+void SatelliteScene::renderMinimap(const Camera &camera, int screenW, int screenH) {
+    int mapSize = 160;
+    int mapX = screenW - mapSize - 20;
+    int mapY = screenH - (mapSize * 2);
+
+    glViewport(mapX, mapY, mapSize, mapSize);
+    glScissor(mapX, mapY, mapSize, mapSize);
+    glEnable(GL_SCISSOR_TEST);
+
+    glClearColor(0.01f, 0.02f, 0.05f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    float viewRange = 25.0f;
+    glm::mat4 orthoProj = glm::ortho(-viewRange, viewRange, -viewRange, viewRange, -100.0f, 100.0f);
+    glm::mat4 topView = glm::lookAt(glm::vec3(0, 60, 0), glm::vec3(0, 0, 0), glm::vec3(0, 0, -1));
+
+    orbitShader->bind();
+    orbitShader->setUniformMatrix4fv("u_view", topView);
+    orbitShader->setUniformMatrix4fv("u_projection", orthoProj);
+    // [Perenderan grid bundar, posisi satelit titik & radar sweep]
+    
+    glDisable(GL_SCISSOR_TEST);
+    glViewport(0, 0, screenW, screenH);
+}
+```
+Penjelasan:
+Sebagai utilitas sekunder taktik pelacakan satelit, sebuah modul Sistem Pemindai Radar dirakit dan disisipkan melayang (Picture-in-Picture) pada pojok kanan bawah dimensi batas jangkauan kanvas layar. Keajaibannya terisolasi dengan perintah pelindung `glScissor` yang memblokir instruksi raster pewarnaan untuk tidak merembes bocor ke luar perimeter kuadrat seluas 160x160 piksel yang disediakannya. Untuk mereplikasi pandangan dari atas layaknya peta komando strategis, parameter konversi 3D-ke-2D dibajak ulang; menggunakan pandangan "Orthographic Projection" yang mengebiri prinsip ilusi kedalaman sehingga semua cincin objek dirender seukuran tanpa distorsi perspektif. Pengamatan kameranya pun dibelokkan ke angkasa luar menjurus tajam tegak lurus (Top-down view) menengok titik tengah pusat orbit (0, 0, 0) yang dipresentasikan apik bersama dengan jarum sweep sapuan berputar ala citra gema pantulan radar.
+
+
+14. Integrasi Overlay Informasi Data Konstan (HUD)
+Source code (main.cpp & InfoPanel.cpp):
+```cpp
+// Dalam main.cpp - Pengambilan status simulasi
+SatInfo info = scene.getSelectedInfo();
+std::string title = (scene.getSelectedSatIndex() != -1) ? "TARGET: " + info.name : "FREE FLY MODE";
+char status[256];
+snprintf(status, sizeof(status),
+         "Speed: %.1f km/s\nAlt: %.0f km\nTime: %.1fx%s\nControls: 1/2/3 Target, 0 Free, +/- Time, R Reset",
+         info.speed, info.altitude, scene.getTimeScale(), scene.isPaused() ? " (PAUSED)" : "");
+
+infoPanel.render(title, status);
+```
+Penjelasan:
+Fasilitas HUD bertindak sebagai penutur indikator real-time instrumen teknis wahana satelit. Setiap rentang detiknya (per frame eksekusi matriks), rutin di `main.cpp` menangkap paket struktur data dinamis satelit yang sedang diobservasi. Karakteristik mentah berupa digit flotasi ini direstrukturisasi dalam buffer berformat (*string formatting*) menjadi kompilasi bait susunan kalimat indikator informatif (Judul Target, Kecepatan Orbital, Elevasi Ketinggian, Rasio Pengali Waktu dsb). Kumpulan karakter teks tersebut disorongkan melintas kepada entitas rendering tekstur fon untuk dieja menjadi hamparan kata demi kata mengapung menimpa tampilan utama tanpa menghalang observasi tata surya di latarnya.
+
+
+15. Terminasi Lingkungan & Tata Kelola Memori Penutupan
+Source code (main.cpp & Window.cpp):
+```cpp
+// Penanganan Deteksi ESC
+if (glfwGetKey(window.p_GLFWwindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+    g_appState = STATE_MENU;
+    window.showCursor();
+}
+
+// Apabila action memanggil Quit di Menu
+if (action == MENU_QUIT) {
+    glfwSetWindowShouldClose(window.p_GLFWwindow(), true);
+}
+
+// Di penghujung nafas loop aplikasi di C++
+Window::~Window() {
+    glfwDestroyWindow(window);
+    glfwTerminate();
+}
+```
+Penjelasan:
+Penghentian aktivitas eksekusi dikelola serapih dan senatural mungkin mengadopsi mekanisme UX perangkat lunak kontemporer. Terdapatinya input keras dari *Escape Key* tidaklah mendegradasi aplikasi menjadi fatal error tertutup runtuh, melainkan ia akan mengabaikan sisa rantai operasional dan mendorong status program berbalik mundur mulus menjadi `STATE_MENU` di mana kursor dibangkitkan ulang. Hanya jika tombol QUIT internal di dalam manu menu benar-benar diklik tegas, bendera sistem inti API GLFW dimanipulasi dengan `SetWindowShouldClose(True)`. Kondisi sakelar yang ditukar menjadi *True* ini secara masal meruntuhkan ikatan pertahanan tembok utama kalang *While Render Loop*. Arus eksekusi pun tergelincir menabrak blok akhir `Return 0`, namun sebelum tewas, barisan Destruktor `~Window()` di C++ sigap otomatis meledak dan memusnahkan selubung kerangka Jendela Antarmuka (Destroy) untuk membuang dan membersihkan kepingan sisa jejak registri perangkat grafis di lapisan Memori Fisik, meninggalkan tatanan sistem komputer rapi bersih seketika (Memory Safe).
+
+
+16. Implementasi Perbesaran Visual (Zoom In / Zoom Out Lensa Kamera)
+Source code (Camera.cpp):
+```cpp
+void Camera::scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
+    Camera *camera = static_cast<Camera *>(glfwGetWindowUserPointer(window));
+    camera->targetFov -= (float)yoffset * 3.0f;
+    camera->targetFov = std::max(20.0f, std::min(120.0f, camera->targetFov));
+}
+
+// Di dalam fungsi processKeyboardInput (Interpolasi FOV pada Frame Update)
+fov += (targetFov - fov) * std::min(1.0f, 8.0f * deltaTime);
+projection = glm::perspective(glm::radians(fov), (float)this->window.getWidth() / (float)this->window.getHeight(), 0.1f, 2000.0f);
+```
+Penjelasan:
+Fitur pengamatan jarak dekat (Zoom In) maupun pelebaran area pandang (Zoom Out) tidak dilakukan secara harafiah dengan memindahkan posisi fisik langkah kamera mendekati objek. Sebagai gantinya, metode ini memanipulasi rentang derajat lebar pandang lensa atau *Field of View* (FOV) pada perhitungan matriks perspektif (`projection matrix`). Ketika roda gulir tetikus (*mouse scroll wheel*) diputar mundur atau maju, variabel bidikan FOV (*Target FOV*) akan berkurang (mengencang/zoom in) atau bertambah (melebar/zoom out) yang diamankan dalam batasan keras ukuran sudut antara 20 derajat hingga maksimal 120 derajat. Namun, agar perubahan jarak pandang ini tidak terasa terputus atau menyentak mata, sistem tidak langsung mentransfer nilainya ke layar seketika itu juga. Sebaliknya, program menggunakan perhitungan kalkulus diskrit (*Lerp*) di tiap iterasi *frame* untuk perlahan namun stabil menghaluskan transisi matematis dari nilai `fov` saat ini menuju nilai `targetFov`. Formula ini mengizinkan pengguna menikmati efek gesekan lensa perbesaran sinematik yang mengalir dramatis nan mulus layaknya kamera di industri perfilman ruang angkasa.
+
+
+17. Sistem Pembekuan Jeda Spasial (Pause Feature)
+Source code (main.cpp & SatelliteScene.cpp):
+```cpp
+// Dari main.cpp (Deteksi Keadaan Tombol 'P' / Rising Edge Trigger)
+static bool pPressed = false;
+if (glfwGetKey(window.p_GLFWwindow(), GLFW_KEY_P) == GLFW_PRESS) {
+    if (!pPressed) {
+        scene.togglePause();
+        pPressed = true;
+    }
+} else { pPressed = false; }
+
+// Dari SatelliteScene.cpp
+void SatelliteScene::togglePause() {
+    isPausedFlag = !isPausedFlag;
+}
+
+// Terapan Implementasi pada Modifikasi Kecepatan (Update Fungsi)
+float currentTimeScale = isPausedFlag ? 0.0f : timeScale;
+earthAngle += earthRotationSpeed * deltaTime * currentTimeScale;
+```
+Penjelasan:
+Demi memfasilitasi kebutuhan pengguna guna mengobservasi ukiran grafis secara lebih intim tanpa diganggu oleh pusaran momentum satelit yang tak kunjung berhenti bermanuver, sebuah sistem sakelar penahan waktu (*Pause Toggle*) disematkan pada tombol interaksi 'P'. Arsitektur algoritma yang diterapkan bukanlah penangkapan status ketukan biasa, melainkan implementasi gerbang logika tuas sisi tegak (*Rising Edge Triggering*). Dalam skema ini, program diinstruksikan menanam ingatan sementara mengenai status kuku jari pengguna (`pPressed`) dengan niatan menekan lonjakan pemanggilan eksekusi ribuan kali bila pengguna sedikit saja telat melepas tekanan jarinya di papan ketik. Ketika Boolean status `isPausedFlag` dikonfirmasi bernilai Benar (True), seluruh komponen pengali kecepatan percepatan absolut fisika alam (`currentTimeScale`) disabotase dan dibekukan seketika menjadi angka Nol mutlak (0.0). Operasi pencampuran waktu nol ini mengunci seluruh persamaan posisional lintasan satelit, menjadikan objek spasial statis membatu mengapung sempurna pada posisinya. Namun daya magis interaksi tetap dijaga: mesin kalkulasi Kamera Pengamat (Free Fly Mode dan *Mouse Look*) diizinkan tetap menyala, melegalkan pengguna bermanuver meliuk-liuk di tengah alam raya simulasi yang sedang terhenti total dalam ruang dan waktu (*Time Freeze*).
+
+
+18. Akselerasi dan Deselerasi Relativitas Waktu (Percepat / Perlambat Simulasi)
+Source code (SatelliteScene.cpp):
+```cpp
+// Dari main.cpp (Deteksi Input Minus dan Sama-Dengan/Plus)
+if (glfwGetKey(window.p_GLFWwindow(), GLFW_KEY_EQUAL) == GLFW_PRESS) {
+    if (!plusPressed) { scene.increaseTimeScale(); plusPressed = true; }
+}
+
+if (glfwGetKey(window.p_GLFWwindow(), GLFW_KEY_MINUS) == GLFW_PRESS) {
+    if (!minusPressed) { scene.decreaseTimeScale(); minusPressed = true; }
+}
+
+// Dari SatelliteScene.cpp
+void SatelliteScene::increaseTimeScale() {
+    timeScale += 0.5f;
+    if (timeScale > 10.0f) timeScale = 10.0f; // Batas Kecepatan Akselerasi Ekstrem
+}
+
+void SatelliteScene::decreaseTimeScale() {
+    timeScale -= 0.5f;
+    if (timeScale < 0.0f) timeScale = 0.0f; // Limit Waktu Minimum
+}
+```
+Penjelasan:
+Mengamati dan menanti satu rotasi perputaran orbit utuh yang dapat berlangsung berlarut-larut secara kecepatan absolut aslinya tentu sangatlah melelahkan dan tak praktis dalam kacamata observasi sebuah simulasi. Sistem kontrol relativitas tempo (*Time Controller*) dititikberatkan dengan kapabilitas laju akselerasi proaktif serta pelambatan (Deselerasi) reaktif. Mekanisme fungsionalitas murninya bertugas memodifikasi konstanta fundamental `timeScale`. Angka pokok yang awalnya dirakit mengantongi nilai normal ekuilibrium 1.0 (Skala Waktu Satu Banding Satu Riil) tersebut diizinkan merenggang dan mengempis ditambahkan konstan jarak pergerakan 0.5 tiap denyut kliknya. Guna memberikan garansi jaminan perlindungan terhadap kemungkinan meledaknya kalkulasi koordinat batas memori Matriks GPU menjadi tak keruan, sebuah gerbang pembatasan absolut (*Hard Capping*) diterapkan dengan ketat pada tingkat pelipatan gandaan kecepatan absolut maksimum menembus parameter batas 10.0x dari rentang kronologis waktu muasalnya.
+
+
+19. Sistem Rantai Penguncian Target Terpadu (Smart Satellite Targeting)
+Source code (main.cpp & SatelliteScene.cpp):
+```cpp
+// Deteksi Pilihan Intervensi Satelit pada Angka 1 (Misal: satelit Aqua)
+if (glfwGetKey(window.p_GLFWwindow(), GLFW_KEY_1) == GLFW_PRESS) {
+    if (!key1Pressed) {
+        scene.selectSatellite(0);
+        OrbitData info = scene.getOrbitData(0);
+        camera.setChaseCamTarget(info.pos, info.frontDir);
+        key1Pressed = true;
+    }
+} else { key1Pressed = false; }
+
+// Pembersihan Total Status Penguncian (Pembatalan Chase Mode pada Tombol 0)
+if (glfwGetKey(window.p_GLFWwindow(), GLFW_KEY_0) == GLFW_PRESS) {
+    scene.deselectSatellite();
+    camera.setFreeMode();
+}
+```
+Penjelasan:
+Mengingat semesta raya dihuni keramaian konstelasi benda buatan berputar pada elevasi berbeda (yaitu kluster instrumen observasi: Aqua, ICESat-2, Landsat 8), perancangan fasilitas penguncian pemilihan objek terstruktur harus ditanamkan menyatu sebagai jembatan yang menghubungkan langsung otorisasi otak mesin Scene dengan komando mekanik Kamera. Sewaktu partisipan memerintahkan pilihan melalui papan penekan berindeks identitas khusus (1, 2, atau 3), simpul akar pangkalan program `main.cpp` akan memaksa entitas *Scene Object* melakukan penyorotan lampu visual menyala (*Highlighting*) khusus pada spesifikasi indeks entri model data satelit tersebut. Menolak puas hanya sampai tahap membedakan warna pelangi secara otonom di ruang angkasa, kerangka kerja seketika merampas posisi tata ruang koordinat parameter absolut satelit incaran (`pos`) lengkap disandingkan besertaan vektor sudut serang laju hidungnya (`frontDir`). Kompilasi bundel nilai-nilai data 3D mentah tadi diekstrak dan didistribusikan mengarah paksa menimpa gerbang masuk kamera bertajuk `setChaseCamTarget()`. Lewat sinkronisasi berlapis ganda inilah fokus bingkai mata kamera dirantai erat menjadi pemburu pantang menyerah membuntuti jejak sang wahana angkasa ke manapun sumbu perputarannya berpindah menembus rel orbit malam. Melepaskan keterikatan (Bypass Release) sama logisnya dicapai lewat pelampiasan perintah tuas tombol (0), di mana kamera disuntik perintah pembatalan mandiri untuk kembali merepresentasikan kacamata petualang perintis kemerdekaan bermanuver sejati (Free Fly Mode).
+
+
+20. Mekanisme Sakelar Visibilitas Sirkuit Lintasan (Toggle Orbit Trails)
+Source code (SatelliteScene.cpp):
+```cpp
+// Sakelar pemicu dari main.cpp dialirkan memanggil instruksi ini
+void SatelliteScene::toggleOrbitTrails() {
+    showOrbitTrails = !showOrbitTrails;
+}
+
+// Konsekuensi Pembacaan Eksekusi Render di Render() Loop
+if (showOrbitTrails) {
+    orbitShader->bind();
+    orbitShader->setUniformMatrix4fv("u_view", camera.getViewMatrix());
+    orbitShader->setUniformMatrix4fv("u_projection", camera.getProjection());
+    
+    // Perulangan Rangkaian Algoritma Penggambaran Garis GL_LINE_LOOP
+    // [Proses buffer Vertex Attribute disemburkan ke Raster GPU]
+}
+```
+Penjelasan:
+Agar kapabilitas adaptasi preferensi representasi simulasi melampaui limitasi diagram rel kereta ruang hampa yang ramai mencoret kanvas, fungsionalitas penghapusan proyeksi visual garis kawat cincin lintasan ditanamkan melalui sebuah arsitektur rekayasa sakelar memori. Mengetuk jemari memencet tuts abjad 'O' bakal membalik sakelar persimpangan logika algoritma Boolean yang bernamakan label `showOrbitTrails`. Alur pipa transmisi perenderan grafis inti (*Graphics Processing Rendering Pipeline*) sungguh-sungguh telah dilapisi gerbang perlindungan penjaga logika gerbang IF bersyarat di kedalaman strukturnya. Karena itulah, sewaktu entitas sinyal kondisi dinilai terbaca menjadi Negatif palsu (False) atas kehendak campur tangan manusia tadi, fase inisiasi program pelukisan garis (*Binding Shader*) ditambah seluruh komplotan beban muatan siklus iteratif pemanggilan grafis garis keliling seribu titik kordinat (`GL_LINE_LOOP`) seketika diloncati dan diabaikan mentah-mentah penuntasannya oleh instrumen perangkat keras mesin kalkulator kartu grafis, menciptakan estetika kegelapan alam galaksi absolut nihil bayang tanpa cacat goresan garis rel navigasi sekecil apapun di sekeliling cakrawala bumi.
+
+
+21. Protokol Restorasi Keseragaman Status Semesta Awal (Global Full Factory Reset)
+Source code (SatelliteScene.cpp):
+```cpp
+// Deklarasi Tindakan Bersih-bersih Masif
+void SatelliteScene::resetAll() {
+    earthAngle = 0.0f;
+    timeScale = 1.0f;
+    isPausedFlag = false;
+    showOrbitTrails = true;
+    selectedSatellite = -1;
+    
+    // Iterasi Brutal Me-reset Parameter Elevasi Sudut Masing-masing Wahana Satelit Kembali Nol
+    for (int i = 0; i < (int)orbits.size(); i++) {
+        orbits[i].currentAngle = 0.0f;
+    }
+}
+```
+Penjelasan:
+Menyerahkan tanggung jawab utuh menyelaraskan kekacauan manuver kehendak partisipan dalam mendistorsi kebebasan hukum fisika observatorium ke titik perawan semula bisa saja terasa menjadi beban psikologis rumit tanpa diiringi oleh fungsionalitas sapu jagat Mesin Waktu Murni (*Global Reset Protocol*). Diterjemahkan dari panggilan penekanan tuas kibor abjad absolut 'R', serangkaian dekrit manipulasi peluluhan dan penimpaan kembali (Overwriting) tatanan memori data terhadap sekujur hierarki elemen properti pondasi alam grafis ditindihkan ke titik keseimbangan standar bawaan pabriknya (`factory defaults`). Nilai Sudut Inklinasi pusaran poros bumi dikembalikan terputar mundur ke titik persentuhan pangkal 0 derajat mula-mulanya. Daya rasio tuas Kecepatan Waktu dilumpuhkan murni memancarkan nilai skala ideal 1.0, keadaan Beku Spasial (Pause) diruntuhkan paksa terhapus (dimatikan), proyeksi visualisasi grafis lintasan sirkit radar angkasa wajib dinyalakan tegak utuh tanpa toleransi bantahan, dan terpenting melebihi apapun: warisan kronologi tumpukan seluruh ingatan pencatatan silsilah sudut tempuh putaran memutar lintasan di masing-masing mesin pemrosesan parameter satelit dibumihanguskan ditelan masa lalu, dan disetel nol kembali menjadi sejajar terikat satu pada garis batas ekuator lurus (*currentAngle = 0.0f*). Segera berlapis menutup di sekeliling perbuatannya, Modul instrumen optik Kamera pun tanpa ragu dititahkan kembali diputus rantai dari sisa jeratan tali mode pelacak (*Chase Target Lock*) seraya disajikan ke mode pengamatan petualang tak terbatas (*Free Camera Standby Mode*), sehingga kanvas tatanan kehidupan sistem tata surya tersuguh kembali murni utuh dan perawan persis bagai sepersekian detik masa fajar awal ketika aplikasi itu diketuk dijalankan dari dalam rahim keping diska keras komputer aslinya.
+
+
+22. Arsitektur Pencahayaan Matahari Direksional (Directional Sun Light System)
+Source code (SatelliteScene.cpp & phong.frag):
+```cpp
+// Dari SatelliteScene.cpp — Konstruktor: Definisi Sumber Cahaya Matahari
+glm::vec3 sunPos(200.0f, 100.0f, 200.0f);
+sunLight = {
+    glm::normalize(-sunPos),                // direction toward scene
+    glm::vec3(0.08f, 0.08f, 0.10f),         // ambient
+    glm::vec3(1.0f,  0.95f, 0.85f),         // diffuse
+    glm::vec3(0.5f,  0.5f,  0.45f)          // specular
+};
+
+// Dari SatelliteScene.cpp — setLights(): Upload Uniform ke GPU
+void SatelliteScene::setLights(Shader &shader) const {
+    shader.setUniform3f("dirLight.direction", sunLight.direction.x, sunLight.direction.y, sunLight.direction.z);
+    shader.setUniform3f("dirLight.ambient",   sunLight.ambient.r,  sunLight.ambient.g,  sunLight.ambient.b);
+    shader.setUniform3f("dirLight.diffuse",   sunLight.diffuse.r,  sunLight.diffuse.g,  sunLight.diffuse.b);
+    shader.setUniform3f("dirLight.specular",  sunLight.specular.r, sunLight.specular.g, sunLight.specular.b);
+}
+
+// Dari phong.frag — Struct Definisi Cahaya Direksional
+struct DirLight {
+    vec3 direction;
+    vec3 ambient;
+    vec3 diffuse;
+    vec3 specular;
+};
+
+// Dari phong.frag — Fungsi Kalkulasi Pencahayaan Direksional
+vec3 calcDirLight(DirLight light, vec3 normal, vec3 viewDir,
+                  vec3 baseDiffuse, vec3 baseAmbient)
+{
+    vec3 lightDir = normalize(-light.direction);
+    vec3 ambient = light.ambient * baseAmbient;
+
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 diffuse = light.diffuse * diff * baseDiffuse;
+
+    vec3 halfwayDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfwayDir), 0.0), material.shininess);
+    vec3 specular = light.specular * spec * material.specular;
+
+    return ambient + diffuse + specular;
+}
+```
+Penjelasan:
+Matahari dalam simulasi ini bukanlah sebuah sumber cahaya titik (*Point Light*) yang melemah seiring jarak, melainkan dimodelkan sebagai sumber cahaya direksional (*Directional Light*) yang mensimulasikan sinar paralel tak terhingga jauhnya, sebagaimana sifat asli cahaya matahari di dunia nyata yang datang dari jarak 150 juta kilometer sehingga sinarnya bisa dianggap sejajar sempurna. Posisi abstrak matahari ditetapkan di koordinat `(200, 100, 200)` yang kemudian dinormalisasi dan dibalik arahnya (`-sunPos`) untuk mendapatkan vektor arah cahaya yang menyinari ke pusat scene. Komponen pencahayaan disusun dalam tiga lapis: *ambient* bernilai sangat rendah `(0.08, 0.08, 0.10)` memberikan iluminasi dasar gelap agar sisi malam Bumi tidak sepenuhnya hitam pekat, *diffuse* bernilai hangat kekuningan `(1.0, 0.95, 0.85)` mereplikasi spektrum cahaya matahari sesungguhnya yang sedikit condong ke arah warna kuning-putih, dan *specular* bernilai moderat `(0.5, 0.5, 0.45)` untuk kilau pantulan permukaan lautan. Di dalam *Fragment Shader*, perhitungan menggunakan model Blinn-Phong dengan vektor *halfway direction* (`halfwayDir`) sebagai pengganti refleksi murni, menghasilkan distribusi kilau spekular yang lebih realistis dan secara komputasi lebih efisien daripada model Phong klasik. Dot product antara normal permukaan dan arah cahaya menghasilkan faktor difus yang secara alamiah menciptakan transisi gradual antara sisi terang (siang) dan sisi gelap (malam) pada permukaan Bumi.
+
+
+23. Konstruksi dan Perenderan Objek Matahari Emisif (Emissive Sun Rendering)
+Source code (SatelliteScene.cpp):
+```cpp
+// Dari buildSun() — Pembangunan Geometri Bola Matahari
+void SatelliteScene::buildSun() {
+    glm::vec3 sunPos(200.0f, 100.0f, 200.0f);
+    sun = std::make_unique<SceneObject>("Sun", "", sunPos, 0.0f);
+
+    // Load Sun texture (extracted from USDZ)
+    GLuint sunTex = loadTexture("../res/models/sun_texture.jpg");
+    Material mat = makeMat({0.0f,0.0f,0.0f}, {1.0f,1.0f,1.0f}, {0.0f,0.0f,0.0f}, 1.0f);
+    mat.textureID = sunTex;
+    sun->addPart(Mesh::createSphere(18.0f, 32, 16), mat);
+}
+
+// Dari render() — Rendering Matahari dengan Override Emissive
+shader.setUniform3f("u_emissive", 1.4f, 1.1f, 0.45f);
+sun->draw(shader);
+shader.setUniform3f("u_emissive", 0.0f, 0.0f, 0.0f);
+
+// Dari phong.frag — Penerapan Emissive pada Output Akhir
+FragColor = vec4(result + u_emissive, u_alpha);
+```
+Penjelasan:
+Matahari sebagai sumber cahaya utama alam semesta tidak boleh terpengaruh oleh perhitungan pencahayaan dari sumber lainnya; ia harus bersinar mandiri. Objek matahari dibangun sebagai bola berdiameter 36 unit (radius 18.0f) yang diletakkan di koordinat `(200, 100, 200)`, cukup jauh dari pusat scene agar memberikan kesan skala jarak kosmik yang proporsional. Material matahari dikonfigurasi secara khusus: komponen *ambient* diset nol absolut `(0, 0, 0)` dan *specular* juga nol, karena matahari tidak memantulkan cahaya dari sumber lain. Komponen *diffuse* diset putih penuh `(1, 1, 1)` agar tekstur permukaan matahari yang diambil dari file `sun_texture.jpg` tampil pada kecerahan 100%. Keajaiban sesungguhnya terletak pada variabel uniform `u_emissive` yang diinjeksikan tepat sebelum matahari di-render. Nilai emisi `(1.4, 1.1, 0.45)` sengaja ditetapkan melebihi rentang normal 1.0 (*over-bright*), menghasilkan efek bola cahaya yang menyilaukan dengan dominasi warna kuning-oranye panas. Dalam persamaan akhir fragment shader, nilai emissive ini dijumlahkan langsung (`result + u_emissive`) ke atas akumulasi pencahayaan konvensional, sehingga permukaan matahari secara harfiah "memancarkan" cahayanya sendiri tanpa bergantung pada sumber iluminasi manapun. Setelah matahari selesai di-render, uniform emissive segera direset ke `(0, 0, 0)` agar objek berikutnya tidak ikut bersinar mandiri.
+
+
+24. Rotasi Aksial Bumi dan Penguncian Stasiun Darat pada Permukaan (Earth Axial Rotation & Ground Station Surface Lock)
+Source code (SatelliteScene.cpp):
+```cpp
+// Dari update() — Rotasi Planet Bumi pada Sumbu Y
+earthRotAngle += 0.05f * dt;
+if (earthRotAngle > glm::two_pi<float>()) earthRotAngle -= glm::two_pi<float>();
+glm::mat4 earthRot = glm::rotate(glm::mat4(1.0f), earthRotAngle, glm::vec3(0,1,0));
+earth->setWorldTransform(earthRot);
+
+// Dari update() — Penguncian Stasiun Darat pada Koordinat Indonesia
+float lat = glm::radians(-2.5f);   // Lintang: -2.5 derajat Selatan
+float lon = glm::radians(115.0f);  // Bujur: 115 derajat Timur
+float r   = EARTH_RADIUS + 0.05f;  // Tepat di permukaan Bumi
+glm::vec3 basePos(
+    r * cosf(lat) * sinf(lon),
+    r * sinf(lat),
+    r * cosf(lat) * cosf(lon)
+);
+
+groundStationPos = glm::vec3(earthRot * glm::vec4(basePos, 1.0f));
+
+// Orientasi Model Stasiun Darat agar "atas" menghadap keluar dari pusat Bumi
+glm::vec3 up = glm::normalize(groundStationPos);
+glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0,1,0), up));
+if (glm::length(right) < 0.001f) right = glm::vec3(1,0,0);
+glm::vec3 fwd = glm::cross(up, right);
+
+glm::mat4 gsOrient(1.0f);
+gsOrient[0] = glm::vec4(right, 0.0f);
+gsOrient[1] = glm::vec4(up,    0.0f);
+gsOrient[2] = glm::vec4(fwd,   0.0f);
+
+groundStation->setWorldTransform(glm::translate(glm::mat4(1.0f), groundStationPos) * gsOrient);
+```
+Penjelasan:
+Bumi tidak hanya diam berpose mati sebagai dekorasi statis. Setiap frame, sudut rotasi aksial (`earthRotAngle`) terakumulasi secara konstan dikalikan faktor kecepatan `0.05f` dan *delta time*, menghasilkan perputaran mulus di sekitar sumbu Y (tegak lurus dari kutub selatan ke kutub utara). Nilai sudut dijaga agar tidak membengkak melampaui satu putaran penuh (`2π radian`) melalui operasi pengurangan modular, mencegah hilangnya presisi floating-point pada angka yang terlalu besar. Matriks rotasi `earthRot` kemudian langsung diterapkan sebagai *World Transform* dari objek Bumi. Stasiun darat (*Ground Station*) ditempatkan pada koordinat geografis riil Indonesia di lintang -2.5° Selatan dan bujur 115° Timur menggunakan konversi koordinat bola (*spherical-to-Cartesian*): rumus `cos(lat)*sin(lon)`, `sin(lat)`, `cos(lat)*cos(lon)` mengubah derajat lintang-bujur menjadi posisi tiga dimensi di permukaan bola. Posisi dasar ini kemudian dikalikan dengan matriks rotasi bumi yang sama (`earthRot * basePos`), menyebabkan stasiun darat ikut terseret berputar bersama permukaan planet persis seperti objek di dunia nyata yang menempel pada kerak bumi. Untuk orientasi model, sebuah basis ortogonal lokal dibangun: vektor "atas" (`up`) diarahkan radial menjauh dari pusat bumi, vektor "kanan" (`right`) diturunkan dari *cross product* dengan sumbu Y global, dan vektor "depan" (`fwd`) melengkapi sistem koordinat tangan kanan. Ketiga vektor ini disusun menjadi matriks orientasi `gsOrient` yang menjamin model piringan antena stasiun darat selalu berdiri tegak menghadap langit di manapun posisinya berada di permukaan bumi yang membulat.
+
+
+25. Orbit Bulan dan Sistem Pencahayaan Reflektif Bulan (Moon Orbit & Dynamic Moonlight)
+Source code (SatelliteScene.cpp):
+```cpp
+// Dari buildMoon() — Konstruksi Model Bulan Bertekstur NASA
+void SatelliteScene::buildMoon() {
+    moon = std::make_unique<SceneObject>("Moon", "", glm::vec3(0.0f), 0.0f);
+    float moonScale = EARTH_RADIUS * 2.0f * 0.27f;  // Rasio nyata Bulan/Bumi ~0.27
+    auto parts = loadModel("../res/models/Moon_NASA_LRO_8k_Topo_Small.glb", moonScale);
+    if (!parts.empty()) {
+        for (auto &gm : parts) {
+            Material mat;
+            if (gm.textureID != 0)
+                mat = makeMat({0.10f,0.10f,0.10f}, {0.9f,0.9f,0.9f}, {0.1f,0.1f,0.1f}, 16.0f);
+            else {
+                glm::vec3 c = gm.color;
+                mat = makeMat(c * 0.12f, c * 0.80f, {0.1f,0.1f,0.1f}, 16.0f);
+            }
+            mat.textureID = gm.textureID;
+            moon->addPart(std::move(gm.mesh), mat);
+        }
+    }
+}
+
+// Dari update() — Dinamika Orbit Bulan
+moonOrbitAngle += 0.08f * dt;
+if (moonOrbitAngle > glm::two_pi<float>()) moonOrbitAngle -= glm::two_pi<float>();
+
+float moonRadius = 40.0f;
+float moonInc = glm::radians(5.1f);  // Inklinasi nyata Bulan ~5.1°
+glm::vec3 moonPos(
+    moonRadius * cosf(moonOrbitAngle),
+    moonRadius * sinf(moonOrbitAngle) * sinf(moonInc),
+    moonRadius * sinf(moonOrbitAngle) * cosf(moonInc)
+);
+moon->setWorldTransform(glm::translate(glm::mat4(1.0f), moonPos));
+
+// Dari setLights() — Kalkulasi Pencahayaan Dinamis Bulan (Phase-Dependent)
+glm::vec3 moonPos = moon->getWorldTransform()[3];
+glm::vec3 moonToEarth = glm::normalize(-moonPos);
+glm::vec3 sunDir = glm::normalize(-sunLight.direction);
+
+// Faktor Fase: seberapa terang sisi bulan yang menghadap Bumi
+float phase = glm::clamp(glm::dot(sunDir, moonToEarth), 0.0f, 1.0f);
+float moonIntensity = phase * 0.12f;
+
+PointLight moonLight = {
+    moonPos,
+    glm::vec3(0.0f),
+    glm::vec3(0.08f, 0.10f, 0.14f) * moonIntensity,  // biru-putih dingin
+    glm::vec3(0.0f),
+    1.0f, 0.007f, 0.0002f
+};
+uploadPL(1, moonLight);
+```
+Penjelasan:
+Bulan dimodelkan menggunakan data topografi NASA (Lunar Reconnaissance Orbiter) yang diskalakan sesuai rasio diameter nyata Bulan terhadap Bumi yaitu sekitar 0.27 (diameter Bulan ~3474 km vs Bumi ~12756 km). Materialnya dikonfigurasi dengan *diffuse* tinggi `(0.9)` dan *specular* rendah `(0.1)` sesuai sifat permukaan regolith bulan yang memantulkan cahaya secara difus. Orbit Bulan mengelilingi Bumi pada jarak 40 unit dengan inklinasi 5.1 derajat sesuai data astronomi riil. Posisi orbital dihitung menggunakan parametrik trigonometri: komponen X bergerak di bidang horizontal murni `cos(angle)`, sementara komponen Y dan Z saling terkait melalui faktor inklinasi `sin(angle)*sin(inc)` dan `sin(angle)*cos(inc)`, menghasilkan orbit eliptis yang sedikit miring terhadap bidang ekliptika simulasi. Fitur paling canggih terletak pada sistem pencahayaan bulan yang bersifat dinamis berdasarkan fase (*Phase-Dependent Moonlight*). Program menghitung *dot product* antara arah datangnya cahaya matahari (`sunDir`) dan arah bulan menuju bumi (`moonToEarth`). Ketika nilai dot product positif tinggi, berarti sisi bulan yang disinari matahari sedang menghadap Bumi (fase purnama/gibbous), sehingga intensitas cahaya pantulan bulan meningkat. Sebaliknya ketika dot product mendekati nol atau negatif (fase sabit/bulan baru), intensitas turun drastis. Cahaya bulan diimplementasikan sebagai *Point Light* berwarna biru-putih dingin `(0.08, 0.10, 0.14)` dengan koefisien atenuasi jarak `(1.0, 0.007, 0.0002)` yang memungkinkan cahayanya menjangkau permukaan bumi secara halus namun realistis, menciptakan efek penerangan nokturnal yang dinamis seiring pergerakan bulan.
+
+
+26. Sorotan Pemindai Cahaya Satelit (Satellite Scan Beam / Spot Light System)
+Source code (SatelliteScene.cpp & phong.frag):
+```cpp
+// Dari render() — Upload Spot Light Uniforms untuk Setiap Satelit
+if (showScanBeam) {
+    shader.setUniform1i("numSpotLights", (int)orbits.size());
+    for (int i = 0; i < (int)orbits.size(); i++) {
+        std::string b = "spotLights[" + std::to_string(i) + "].";
+        glm::vec3 dir = glm::normalize(-orbits[i].pos); // mengarah ke Bumi
+        shader.setUniform3f(b+"position",    orbits[i].pos.x, orbits[i].pos.y, orbits[i].pos.z);
+        shader.setUniform3f(b+"direction",   dir.x, dir.y, dir.z);
+        shader.setUniform3f(b+"diffuse",     0.4f, 0.8f, 1.0f);   // cyan-blue beam
+        shader.setUniform3f(b+"specular",    0.3f, 0.5f, 0.7f);
+        shader.setUniform1f(b+"cutOff",      glm::cos(glm::radians(8.0f)));   // inner cone
+        shader.setUniform1f(b+"outerCutOff", glm::cos(glm::radians(14.0f)));  // soft outer edge
+        shader.setUniform1f(b+"constant",    1.0f);
+        shader.setUniform1f(b+"linear",      0.007f);
+        shader.setUniform1f(b+"quadratic",   0.0002f);
+    }
+}
+
+// Dari render() — Rendering Geometri Kerucut Scan Beam Semi-Transparan
+glDisable(GL_CULL_FACE);
+shader.setUniform1f("u_alpha", 0.28f);
+for (auto &o : orbits) {
+    float satDist = glm::length(o.pos);
+    float beamLen = satDist - EARTH_RADIUS;
+    glm::vec3 earthToSat = glm::normalize(o.pos);
+    // Orientasi kerucut agar mengarah ke Bumi
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    float cosA    = glm::clamp(glm::dot(up, earthToSat), -1.0f, 1.0f);
+    glm::vec3 ax  = glm::cross(up, earthToSat);
+    glm::mat4 R   = (glm::length(ax) > 0.001f)
+                    ? glm::rotate(glm::mat4(1.0f), acosf(cosA), glm::normalize(ax))
+                    : glm::mat4(1.0f);
+    glm::mat4 S   = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, beamLen / 2.5f, 1.0f));
+    glm::vec3 T   = o.pos - beamLen * earthToSat;
+    glm::mat4 M   = glm::translate(glm::mat4(1.0f), T) * R * S;
+    drawMesh(shader, scanBeamMesh, scanBeamMat, M);
+}
+
+// Dari phong.frag — Fungsi Kalkulasi Spot Light dengan Soft Edge
+vec3 calcSpotLight(SpotLightData light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 baseDiffuse) {
+    vec3 lightDir = normalize(light.position - fragPos);
+    float distance = length(light.position - fragPos);
+    float theta     = dot(lightDir, normalize(-light.direction));
+    float epsilon   = light.cutOff - light.outerCutOff;
+    float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
+    if (intensity <= 0.0) return vec3(0.0);
+    float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * distance * distance);
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 diffuse = light.diffuse * diff * baseDiffuse;
+    vec3 halfwayDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfwayDir), 0.0), material.shininess);
+    vec3 specular = light.specular * spec * material.specular;
+    return (diffuse + specular) * attenuation * intensity;
+}
+```
+Penjelasan:
+Setiap satelit observasi dilengkapi dengan sistem pemindai cahaya (*Scan Beam*) yang diimplementasikan sebagai sumber cahaya sorot (*Spot Light*) dalam arsitektur pencahayaan Phong. Ketika pengguna mengaktifkan fitur ini melalui tombol 'F', setiap satelit memancarkan kerucut cahaya biru-sian (*cyan-blue*) `(0.4, 0.8, 1.0)` yang mengarah tepat ke permukaan Bumi. Arah kerucut dihitung dari normalisasi vektor posisi negatif satelit (`-orbits[i].pos`), menjamin bahwa pancaran selalu menjurus ke pusat planet. Sudut kerucut diimplementasikan dengan dua lapisan: *inner cutOff* sebesar 8 derajat menghasilkan inti kerucut yang terang pekat, dan *outer cutOff* sebesar 14 derajat menciptakan tepi gradual yang memudar halus (*soft edge falloff*). Transisi antara kedua sudut ini dikalkulasi menggunakan formula interpolasi `(theta - outerCutOff) / epsilon` yang di-clamp antara 0 dan 1, menghasilkan atenuasi angular yang mulus tanpa batas tajam. Secara visual, kerucut cahaya juga dirender sebagai geometri mesh kerucut semi-transparan (`alpha = 0.28`) dengan panjang dinamis yang dihitung dari jarak satelit ke permukaan Bumi (`satDist - EARTH_RADIUS`). Orientasi kerucut geometri dihitung menggunakan *cross product* dan *arc cosine* antara vektor up default dan arah satelit-ke-Bumi, menghasilkan matriks rotasi yang mengarahkan kerucut secara presisi. Koefisien atenuasi jarak `(1.0, 0.007, 0.0002)` memastikan cahaya scan beam dapat menjangkau permukaan Bumi dengan intensitas yang memadai namun tetap melemah secara realistis seiring jarak, menciptakan titik terang (*hotspot*) pada permukaan planet yang disinari.
+
+
+27. Transmisi Data Satelit dan Deteksi Garis Pandang (Data Downlink & Line-of-Sight)
+Source code (SatelliteScene.cpp):
+```cpp
+// Dari update() — Animasi Partikel Transmisi Data dengan Deteksi LoS
+if (showParticles) {
+    for (int s = 0; s < (int)particleT.size(); s++) {
+        glm::vec3 satPos = orbits[s].pos;
+        glm::vec3 rayDir = glm::normalize(groundStationPos - satPos);
+        float rayLen = glm::length(groundStationPos - satPos);
+
+        // Ray-Sphere Intersection: Cek apakah garis dari satelit ke stasiun menembus Bumi
+        float tClosest = glm::dot(-satPos, rayDir);
+        tClosest = glm::clamp(tClosest, 0.0f, rayLen);
+        glm::vec3 closest = satPos + tClosest * rayDir;
+        float distToCenter = glm::length(closest);
+        bool hasLoS = (distToCenter > EARTH_RADIUS - 0.1f);
+
+        for (int p = 0; p < NUM_PARTICLES; p++) {
+            if (hasLoS) {
+                particleT[s][p] += 0.45f * dt;
+                if (particleT[s][p] > 1.0f) particleT[s][p] -= 1.0f;
+            }
+            // Tanpa LoS, partikel membeku — transmisi terhenti
+        }
+    }
+}
+
+// Dari render() — Rendering Garis Penghubung dan Paket Data
+if (showParticles) {
+    shader.setUniform3f("u_emissive", 0.3f, 0.25f, 0.0f);
+    for (int s = 0; s < (int)orbits.size(); s++) {
+        // ... deteksi LoS ulang ...
+        if (!hasLoS) continue; // Lewati satelit tanpa garis pandang
+
+        // Garis tipis penghubung satelit ke stasiun darat
+        shader.setUniform1f("u_alpha", 0.12f);
+        glm::vec3 mid = (satPos + groundStationPos) * 0.5f;
+        // ... orientasi garis ...
+        drawMesh(shader, particleMesh, particleMat, M);
+
+        // Paket data bergerak sepanjang jalur
+        for (int p = 0; p < NUM_PARTICLES; p++) {
+            float t = particleT[s][p];
+            glm::vec3 linear = glm::mix(satPos, groundStationPos, t);
+            // Arc path: dorong keluar jika paket menembus permukaan Bumi
+            glm::vec3 midDir = glm::normalize(linear);
+            float minAlt = EARTH_RADIUS + 0.5f;
+            float currentAlt = glm::length(linear);
+            glm::vec3 pPos = (currentAlt < minAlt) ? midDir * minAlt : linear;
+            drawMesh(shader, particleMesh, particleMat, glm::translate(glm::mat4(1.0f), pPos));
+        }
+    }
+    shader.setUniform3f("u_emissive", 0.0f, 0.0f, 0.0f);
+}
+```
+Penjelasan:
+Fitur transmisi data (*Data Downlink*) mensimulasikan pengiriman paket informasi dari setiap satelit menuju stasiun darat di permukaan Bumi. Sebelum partikel data diizinkan bergerak, sistem melakukan pengecekan garis pandang (*Line-of-Sight* / LoS) menggunakan algoritma *Ray-Sphere Intersection* yang elegan. Sebuah sinar virtual ditarik dari posisi satelit menuju stasiun darat, kemudian program menghitung titik terdekat sinar tersebut terhadap pusat Bumi (origin). Jika jarak titik terdekat ke pusat Bumi lebih kecil dari radius Bumi, berarti sinar tersebut menembus badan planet — artinya Bumi menghalangi jalur transmisi (*occluded*), dan transmisi data dibatalkan. Ketika LoS tersedia, sejumlah `NUM_PARTICLES` partikel bergerak sepanjang jalur interpolasi linear (`glm::mix`) dari posisi satelit menuju stasiun darat. Parameter `t` setiap partikel bergerak maju secara konstan `(+0.45 * dt)` dan di-reset sirkular ketika mencapai 1.0, menciptakan aliran paket berulang. Untuk menghindari partikel yang secara visual menembus permukaan Bumi pada jalur transfer bersudut rendah, sistem menerapkan koreksi *arc path*: jika ketinggian partikel jatuh di bawah `EARTH_RADIUS + 0.5`, posisinya didorong keluar radial ke ketinggian minimum, menghasilkan lintasan melengkung yang mengikuti kurva permukaan Bumi. Secara visual, garis penghubung transparan (`alpha = 0.12`) ditarik antara satelit dan stasiun untuk menunjukkan jalur komunikasi aktif, dan partikel paket data diberi cahaya emissive kuning-emas `(0.3, 0.25, 0.0)` agar bersinar di kegelapan ruang angkasa.
+
+
+28. Orientasi Nadir Satelit dan Pembangunan Model (Satellite Nadir-Pointing & Model Construction)
+Source code (SatelliteScene.cpp):
+```cpp
+// Dari buildSatellites() — Konstruksi Model Satelit dari GLB
+struct SatDef { const char *name; const char *glbPath; float scale; };
+SatDef defs[] = {
+    { "Aqua",      "../res/models/aqua.glb",     2.0f },
+    { "ICESat-2",  "../res/models/icesat2.glb",  2.0f },
+    { "Landsat 8", "../res/models/landsat8.glb", 2.5f },
+};
+for (int i = 0; i < (int)orbits.size(); i++) {
+    auto obj = std::make_unique<SceneObject>(defs[i].name, "", orbits[i].pos, 0.0f);
+    auto parts = loadGLBColored(defs[i].glbPath, defs[i].scale);
+    for (auto &gm : parts) {
+        glm::vec3 c = gm.color;
+        Material mat = makeMat(c * 0.15f, c * 0.85f, {0.5f,0.5f,0.55f}, 32.0f);
+        mat.textureID = gm.textureID;
+        obj->addPart(std::move(gm.mesh), mat);
+    }
+    satellites.push_back(std::move(obj));
+}
+
+// Dari update() — Orientasi Nadir (Selalu Menghadap Bumi)
+for (int i = 0; i < (int)orbits.size(); i++) {
+    orbits[i].angle += orbits[i].speed * dt;
+    orbits[i].pos = computeOrbitPos(orbits[i]);
+
+    glm::vec3 pos = orbits[i].pos;
+    glm::vec3 toEarth = glm::normalize(-pos);    // Vektor menuju pusat Bumi
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+
+    // Hindari singularitas ketika satelit tepat di atas/bawah kutub
+    if (std::abs(glm::dot(toEarth, up)) > 0.99f)
+        up = glm::vec3(0.0f, 0.0f, 1.0f);
+
+    glm::vec3 right = glm::normalize(glm::cross(up, toEarth));
+    glm::vec3 corrUp = glm::cross(toEarth, right);
+
+    glm::mat4 orient(1.0f);
+    orient[0] = glm::vec4(right,    0.0f);
+    orient[1] = glm::vec4(corrUp,   0.0f);
+    orient[2] = glm::vec4(-toEarth, 0.0f);  // sumbu -Z menghadap Bumi
+
+    satellites[i]->setWorldTransform(glm::translate(glm::mat4(1.0f), pos) * orient);
+}
+```
+Penjelasan:
+Setiap satelit dibangun dari model 3D berformat GLB (Aqua, ICESat-2, dan Landsat 8) yang dimuat dan diskalakan ke ukuran proporsi simulasi. Materialnya dikonfigurasi dengan komponen *specular* yang lebih tinggi `(0.5, 0.5, 0.55)` dan *shininess* 32.0 untuk mereplikasi kilau panel logam dan material komposit yang khas pada badan wahana antariksa. Orientasi satelit diimplementasikan menggunakan sistem *Nadir-Pointing*, yaitu instrumen pengamatan satelit selalu menghadap ke permukaan Bumi. Vektor `toEarth` dihitung dari normalisasi posisi negatif (`-pos`), yang secara geometris selalu mengarah dari posisi satelit menuju pusat Bumi (titik origin). Untuk membangun basis ortogonal dari vektor tunggal ini, digunakan teknik *Gram-Schmidt*: vektor `right` diturunkan dari *cross product* antara vektor up global dan `toEarth`, kemudian vektor `corrUp` (*corrected up*) dihitung dari *cross product* antara `toEarth` dan `right`, menghasilkan tiga sumbu yang saling tegak lurus sempurna. Sumbu -Z satelit (`-toEarth`) diarahkan menghadap Bumi, sesuai konvensi orientasi wahana antariksa di mana sensor dan kamera pengamatan dipasang di sisi nadir. Program juga menangani kasus singularitas (*gimbal lock*) ketika satelit berada tepat di atas atau di bawah kutub: jika dot product antara `toEarth` dan vektor up mendekati 1.0 (sejajar), vektor up diganti ke sumbu Z `(0, 0, 1)` untuk menghindari *cross product* yang menghasilkan vektor nol. Matriks orientasi akhir digabung dengan matriks translasi posisi orbit, menjamin satelit selalu "menunduk" menatap Bumi ke manapun ia bergerak di sepanjang rel orbitnya.
+
+
+29. Sistem Pencahayaan dan Rendering Bintang Prosedural (Starfield Lighting & Twinkle Shader)
+Source code (Starfield.cpp, starfield.vert & starfield.frag):
+```cpp
+// Dari Starfield.cpp — Generasi Prosedural 2500 Bintang
+Starfield::Starfield(int numStars)
+    : shader("../res/shaders/starfield.vert", "../res/shaders/starfield.frag"),
+      VAO(0), VBO(0), starCount(numStars)
+{
+    std::vector<float> data;
+    data.reserve(numStars * 5);  // posisi(3) + brightness(1) + size(1)
+    unsigned int seed = 42;
+    float skyRadius = 800.0f;
+
+    for (int i = 0; i < numStars; i++) {
+        // Distribusi seragam pada bola menggunakan formula Archimedes
+        float theta = 2.0f * M_PI * randFloat(seed);
+        float phi = acosf(2.0f * randFloat(seed) - 1.0f);
+
+        float x = skyRadius * sinf(phi) * cosf(theta);
+        float y = skyRadius * sinf(phi) * sinf(theta);
+        float z = skyRadius * cosf(phi);
+
+        float brightness = 0.3f + 0.7f * randFloat(seed);
+        float size = 1.0f + 2.5f * randFloat(seed);
+
+        // 5% bintang menjadi raksasa super terang
+        if (randFloat(seed) < 0.05f) {
+            brightness = 0.9f + 0.1f * randFloat(seed);
+            size = 3.0f + 2.0f * randFloat(seed);
+        }
+
+        data.push_back(x); data.push_back(y); data.push_back(z);
+        data.push_back(brightness); data.push_back(size);
+    }
+    // ... setup VAO/VBO dengan 3 atribut vertex ...
+}
+```
+```glsl
+// Dari starfield.vert — Vertex Shader: Efek Kedip dan Ukuran Dinamis
+void main() {
+    // Efek kedip: modulasi kecerahan dengan gelombang sinus
+    float twinkle = 0.6 + 0.4 * sin(u_time * 1.5 + aBrightness * 31.415);
+    vBrightness = aBrightness * twinkle;
+
+    gl_Position = u_projection * u_view * vec4(aPos, 1.0);
+    gl_PointSize = aSize * (1.0 + 0.3 * sin(u_time * 2.0 + aBrightness * 17.3));
+}
+
+// Dari starfield.frag — Fragment Shader: Warna Spektral dan Bentuk Bulat
+void main() {
+    // Buang piksel sudut agar titik persegi menjadi lingkaran
+    vec2 coord = gl_PointCoord - vec2(0.5);
+    float dist = length(coord);
+    if (dist > 0.5) discard;
+
+    // Gradien cahaya memudar dari pusat
+    float alpha = smoothstep(0.5, 0.1, dist);
+
+    // Variasi warna spektral berdasarkan kecerahan
+    vec3 coolStar = vec3(0.7, 0.8, 1.0);   // biru-putih (bintang panas)
+    vec3 warmStar = vec3(1.0, 0.9, 0.7);   // kuning hangat (bintang dingin)
+    vec3 color = mix(coolStar, warmStar, vBrightness);
+
+    FragColor = vec4(color * vBrightness, alpha * vBrightness);
+}
+```
+Penjelasan:
+Sistem bintang dibangun secara prosedural tanpa menggunakan aset gambar *skybox* apapun. Sejumlah 2500 titik bintang dibangkitkan pada permukaan bola berdiameter 1600 unit (radius 800) menggunakan distribusi seragam Archimedes: formula `phi = acos(2*rand - 1)` menjamin titik-titik terdistribusi merata di seluruh permukaan bola tanpa penumpukan di kutub, sebuah masalah klasik yang terjadi jika menggunakan distribusi theta-phi biasa. Setiap bintang memiliki dua atribut unik: kecerahan (*brightness*) acak antara 0.3-1.0 dan ukuran (*size*) acak antara 1.0-3.5 piksel. Sebanyak 5% bintang dikategorikan sebagai "bintang raksasa" dengan kecerahan 0.9-1.0 dan ukuran 3.0-5.0 piksel, menciptakan variasi visual yang realistis. Di dalam *Vertex Shader*, efek kedip (*twinkling*) diwujudkan melalui modulasi sinusoidal: kecerahan dikalikan dengan `0.6 + 0.4 * sin(time * 1.5 + brightness * 31.415)`, di mana konstanta irasional 31.415 sebagai *phase offset* menjamin setiap bintang berkedip pada fase yang berbeda-beda dan tidak sinkron. Ukuran titik juga berosilasi dengan frekuensi berbeda `(time * 2.0)` dan fase berbeda `(brightness * 17.3)`, menghasilkan ilusi bintang yang "bernafas" hidup. Di dalam *Fragment Shader*, titik persegi bawaan GPU dikonversi menjadi lingkaran sempurna dengan mem-buang (*discard*) fragmen yang jaraknya dari pusat melebihi 0.5. Gradien cahaya dari pusat ke tepi dihitung menggunakan `smoothstep(0.5, 0.1, dist)` yang menciptakan efek *glow* memudar halus. Warna bintang divariasikan secara spektral: bintang redup cenderung berwarna biru-putih dingin `(0.7, 0.8, 1.0)` merepresentasikan bintang tipe O/B yang panas, sedangkan bintang terang cenderung kuning hangat `(1.0, 0.9, 0.7)` merepresentasikan bintang tipe G/K yang lebih sejuk, mengikuti diagram Hertzsprung-Russell dalam astrofisika. Output akhir `color * vBrightness` dan `alpha * vBrightness` memastikan bintang redup secara proporsional juga lebih transparan, memberikan kesan kedalaman dimensional bahwa bintang yang lebih redup berada lebih jauh di kedalaman galaksi.

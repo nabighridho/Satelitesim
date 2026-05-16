@@ -33,7 +33,7 @@ Window::Window()
 
     glViewport(0, 0, WIN_WIDTH, WIN_HEIGHT);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    // Cursor mode managed by app state (menu = visible, game = hidden)
 }
 
 Window::~Window()

@@ -1,0 +1,296 @@
+================================================================================
+  ANALISIS PENERAPAN MATERI LEARNOPENGL PADA PROYEK SATELLITE SIMULATOR
+================================================================================
+
+Proyek: Satellite Simulator (Grafkom Planet)
+Referensi: https://learnopengl.com
+
+================================================================================
+BAGIAN 1: GETTING STARTED
+================================================================================
+
+1.1 CREATING A WINDOW (Window.cpp)
+-----------------------------------
+Materi: Inisialisasi GLFW dan pembuatan window OpenGL.
+Kode:
+  - glfwInit() → inisialisasi library GLFW
+  - glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4) → minta OpenGL 4.6 core
+  - glfwCreateWindow(1280, 720, "Aqua Satellite Simulation", NULL, NULL)
+  - glfwMakeContextCurrent(window) → set konteks OpenGL aktif
+  - gladLoadGLLoader() → load semua fungsi OpenGL via GLAD
+  - glfwSetFramebufferSizeCallback → resize callback
+
+1.2 HELLO TRIANGLE / VAO-VBO-EBO (Mesh.cpp, Mesh.h)
+----------------------------------------------------
+Materi: Vertex Array Object, Vertex Buffer Object, Element Buffer Object.
+Struct vertex:
+  struct PhongVertex { vec3 position; vec3 normal; vec2 texCoord; };
+
+Kode upload():
+  glGenVertexArrays(1, &VAO);
+  glGenBuffers(1, &VBO);
+  glGenBuffers(1, &EBO);
+  glBindVertexArray(VAO);
+  glBufferData(GL_ARRAY_BUFFER, ..., vertices.data(), GL_STATIC_DRAW);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, ..., indices.data(), GL_STATIC_DRAW);
+  glVertexAttribPointer(0, 3, GL_FLOAT, ...); // position
+  glVertexAttribPointer(1, 3, GL_FLOAT, ...); // normal
+  glVertexAttribPointer(2, 2, GL_FLOAT, ...); // texCoord
+
+Kode draw():
+  glBindVertexArray(VAO);
+  glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
+
+1.3 SHADERS (shader.cpp, shader.h)
+-----------------------------------
+Materi: Kompilasi vertex+fragment shader, linking program.
+Kode:
+  glCreateShader(GL_VERTEX_SHADER / GL_FRAGMENT_SHADER)
+  glShaderSource(id, 1, &src, nullptr)
+  glCompileShader(id)
+  glCreateProgram() → glAttachShader → glLinkProgram → glValidateProgram
+  glUseProgram(ID) → bind shader
+  glGetUniformLocation() → kirim data uniform
+  setUniformMatrix4fv(), setUniform3f(), setUniform1f(), setUniform1i()
+
+File GLSL: phong.vert dan phong.frag
+  - Vertex shader: transformasi posisi (model*view*projection), kirim FragPos, Normal, TexCoord
+  - Fragment shader: hitung pencahayaan Phong per-fragment
+
+1.4 TEXTURES (textures.cpp, Mesh.cpp)
+--------------------------------------
+Materi: Loading gambar sebagai texture OpenGL.
+Kode textures.cpp (class Texture):
+  stbi_set_flip_vertically_on_load(1);
+  stbi_load(path, &width, &height, &BPP, 4);
+  glGenTextures(1, &ID);
+  glBindTexture(GL_TEXTURE_2D, ID);
+  glTexParameteri(... GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(... GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, ...);
+  glGenerateMipmap(GL_TEXTURE_2D);
+
+Kode loadTexture() di Mesh.cpp:
+  - Sama prinsipnya, wrap=GL_REPEAT, filter=GL_LINEAR_MIPMAP_LINEAR
+  - Mendukung format GL_RGB, GL_RGBA, GL_RED berdasarkan jumlah channel
+
+Texture binding di SceneObject::draw():
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, part.material.textureID);
+  shader.setUniform1i("u_texture", 0);
+  shader.setUniform1i("u_useTexture", 1);
+
+1.5 TRANSFORMATIONS (SatelliteScene.cpp, SceneObject.cpp)
+---------------------------------------------------------
+Materi: Model-View-Projection matrix, translate, rotate, scale.
+Kode:
+  glm::translate(glm::mat4(1.0f), position)  → posisi objek
+  glm::rotate(glm::mat4(1.0f), angle, axis)  → rotasi Bumi, orbit bulan
+  glm::scale(glm::mat4(1.0f), glm::vec3(s))  → skala atmosfer
+
+  Model matrix per-part: model = worldTransform * part.localTransform
+  Normal matrix: glm::transpose(glm::inverse(glm::mat3(model)))
+
+  Uniform ke shader:
+    shader.setUniformMatrix4fv("u_model", model);
+    shader.setUniformMatrix4fv("u_view", camera.getViewMatrix());
+    shader.setUniformMatrix4fv("u_projection", camera.getProjection());
+
+1.6 CAMERA (Camera.cpp, Camera.h)
+----------------------------------
+Materi: FPS-style camera, Euler angles, look-at matrix.
+Kode:
+  view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+  projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 2000.0f);
+
+  Mouse callback (Euler angles):
+    yaw += xoffset * sensitivity;
+    pitch += yoffset * sensitivity;  // clamped -89..89
+    front.x = cos(radians(yaw)) * cos(radians(pitch));
+    front.y = sin(radians(pitch));
+    front.z = sin(radians(yaw)) * cos(radians(pitch));
+    cameraFront = normalize(front);
+
+  Keyboard (WASD+QE):
+    W/S → maju/mundur sepanjang cameraFront
+    A/D → kiri/kanan (cross product cameraFront x cameraUp)
+    Q/E → turun/naik sepanjang cameraUp
+    Shift → speed boost 2.5x
+
+  Scroll callback → zoom (FOV 20-120 derajat, smooth interpolation)
+
+  Chase camera mode: kamera otomatis mengikuti satelit terpilih
+    cameraPos lerp ke posisi offset di belakang target
+
+================================================================================
+BAGIAN 2: LIGHTING
+================================================================================
+
+2.1 PHONG LIGHTING MODEL (phong.frag)
+--------------------------------------
+Materi: Ambient + Diffuse + Specular (Blinn-Phong variant).
+Kode di fragment shader:
+  // Ambient
+  vec3 ambient = light.ambient * baseAmbient;
+
+  // Diffuse (Lambert)
+  float diff = max(dot(normal, lightDir), 0.0);
+  vec3 diffuse = light.diffuse * diff * baseDiffuse;
+
+  // Specular (Blinn-Phong: halfway vector)
+  vec3 halfwayDir = normalize(lightDir + viewDir);
+  float spec = pow(max(dot(normal, halfwayDir), 0.0), material.shininess);
+  vec3 specular = light.specular * spec * material.specular;
+
+2.2 MATERIALS (Material.h)
+---------------------------
+Materi: Properti material (ambient, diffuse, specular, shininess).
+Kode:
+  struct Material {
+      vec3 ambient; vec3 diffuse; vec3 specular;
+      float shininess;
+      GLuint textureID;
+  };
+  Preset: metal(shine=64), plastic(32), darkPlastic(16), concrete(8), dll.
+  Digunakan di drawMesh() dan SceneObject::draw() → dikirim sebagai uniform.
+
+2.3 LIGHTING MAPS (phong.frag, SceneObject.cpp)
+------------------------------------------------
+Materi: Texture sebagai diffuse map.
+Kode fragment shader:
+  if (u_useTexture == 1) {
+      vec3 texColor = texture(u_texture, TexCoord).rgb;
+      baseDiffuse = texColor;          // texture menggantikan diffuse
+      baseAmbient = texColor * 0.15;   // ambient mengikuti texture
+  }
+  → Bumi, Bulan, Matahari menggunakan texture diffuse map dari NASA
+
+2.4 LIGHT CASTERS (Light.h, phong.frag, SatelliteScene.cpp)
+------------------------------------------------------------
+Materi: Directional, Point, dan Spot light.
+
+A) DIRECTIONAL LIGHT (Matahari):
+  struct DirLight { vec3 direction, ambient, diffuse, specular; };
+  Kode setup:
+    sunLight.direction = normalize(-sunPos);  // arah cahaya paralel
+    sunLight.diffuse = vec3(1.0, 0.95, 0.85); // warm sunlight
+  Shader: calcDirLight() → tidak ada attenuation
+
+B) POINT LIGHT (Fill light + Moonlight):
+  struct PointLight { position, ambient, diffuse, specular, constant, linear, quadratic; };
+  Attenuation formula:
+    attenuation = 1.0 / (constant + linear*d + quadratic*d*d)
+  Fill light: cahaya pengisi dari arah berlawanan matahari
+  Moonlight: intensitas dinamis berdasarkan fase bulan (dot product)
+    float phase = dot(sunDir, moonToEarth); // 0=new moon, 1=full moon
+    moonIntensity = phase * 0.12;
+
+C) SPOT LIGHT (Scan beam satelit):
+  struct SpotLight { position, direction, diffuse, specular, cutOff, outerCutOff, ... };
+  Soft-edge cone:
+    float theta = dot(lightDir, normalize(-light.direction));
+    float epsilon = cutOff - outerCutOff;
+    float intensity = clamp((theta - outerCutOff) / epsilon, 0.0, 1.0);
+  Inner cone = 8 derajat, outer cone = 14 derajat
+
+2.5 MULTIPLE LIGHTS (phong.frag)
+---------------------------------
+Materi: Menggabungkan beberapa sumber cahaya.
+Kode:
+  vec3 result = vec3(0.0);
+  result += calcDirLight(dirLight, ...);          // 1 directional
+  for (i < numPointLights)                        // 2 point lights
+      result += calcPointLight(pointLights[i], ...);
+  for (i < numSpotLights)                         // 3 spot lights
+      result += calcSpotLight(spotLights[i], ...);
+  FragColor = vec4(result + u_emissive, u_alpha); // + emissive untuk Matahari
+
+================================================================================
+BAGIAN 3: MODEL LOADING
+================================================================================
+
+3.1 ASSIMP MODEL LOADING (Mesh.cpp)
+-------------------------------------
+Materi: Import model 3D menggunakan library Assimp.
+File yang di-load: Earth (.glb), Aqua (.glb), ICESat-2 (.glb),
+                   Landsat 8 (.glb), Moon (.glb), Ground Station (.obj)
+
+Kode loadModel():
+  #include <assimp/Importer.hpp>
+  #include <assimp/scene.h>
+  #include <assimp/postprocess.h>
+
+  Assimp::Importer importer;
+  const aiScene *scene = importer.ReadFile(path,
+      aiProcess_Triangulate |           // konversi ke segitiga
+      aiProcess_GenSmoothNormals |      // generate normal halus
+      aiProcess_JoinIdenticalVertices | // gabung vertex duplikat
+      aiProcess_PreTransformVertices |  // terapkan transform node
+      aiProcess_SortByPType);           // sortir per tipe primitif
+
+  // Iterasi setiap mesh dalam scene
+  for (m = 0; m < scene->mNumMeshes; m++) {
+      aiMesh *aiM = scene->mMeshes[m];
+      // Ekstrak vertices: position, normal, texCoord
+      // Ekstrak indices dari faces
+      // Ekstrak material color dan texture
+  }
+
+3.2 EMBEDDED TEXTURE (Mesh.cpp - extractTexture)
+--------------------------------------------------
+Materi: Loading texture dari dalam file GLB (embedded).
+Kode:
+  if (path[0] == '*') {   // path '*0', '*1', dll = embedded
+      int texIndex = atoi(path.c_str() + 1);
+      aiTexture *aiTex = scene->mTextures[texIndex];
+      if (aiTex->mHeight == 0)  // compressed (JPEG/PNG dalam memori)
+          data = stbi_load_from_memory(aiTex->pcData, aiTex->mWidth, ...);
+      else                      // raw RGBA pixels
+          data = (unsigned char*)aiTex->pcData;
+  } else {
+      // External file texture
+      data = stbi_load(fullPath.c_str(), ...);
+  }
+
+3.3 MATERIAL EXTRACTION (Mesh.cpp - extractColor)
+---------------------------------------------------
+Materi: Mengambil warna diffuse dari material Assimp.
+Kode:
+  mat->Get(AI_MATKEY_COLOR_DIFFUSE, color);
+  // Fallback berdasarkan nama material:
+  if (name.find("gold") != npos) return {0.75, 0.55, 0.08};
+  if (name.find("solar") != npos) return {0.04, 0.08, 0.30};
+  // dll.
+
+3.4 NORMALISASI MODEL (Mesh.cpp)
+----------------------------------
+Materi: Auto-scale model ke ukuran yang konsisten.
+Kode:
+  // Hitung bounding box
+  bboxMin = min(bboxMin, pos); bboxMax = max(bboxMax, pos);
+  // Normalisasi: center & fit ke unit cube, lalu scale
+  center = (bboxMin + bboxMax) * 0.5f;
+  maxExtent = max(extent.x, extent.y, extent.z);
+  normalize = 1.0f / maxExtent;
+  v.position = (v.position - center) * normalize * scale;
+
+================================================================================
+RINGKASAN MATERI YANG DITERAPKAN
+================================================================================
+
+| No | Materi LearnOpenGL          | File Utama          | Status     |
+|----|-----------------------------|---------------------|------------|
+| 1  | Creating a Window           | Window.cpp          | Diterapkan |
+| 2  | Hello Triangle (VAO/VBO)    | Mesh.cpp            | Diterapkan |
+| 3  | Shaders                     | shader.cpp, *.glsl  | Diterapkan |
+| 4  | Textures                    | textures.cpp        | Diterapkan |
+| 5  | Transformations             | SatelliteScene.cpp  | Diterapkan |
+| 6  | Camera                      | Camera.cpp          | Diterapkan |
+| 7  | Colors & Basic Lighting     | phong.frag          | Diterapkan |
+| 8  | Materials                   | Material.h          | Diterapkan |
+| 9  | Lighting Maps               | phong.frag          | Diterapkan |
+| 10 | Light Casters (Dir/Pt/Spot) | Light.h, phong.frag | Diterapkan |
+| 11 | Multiple Lights             | phong.frag          | Diterapkan |
+| 12 | Model Loading (Assimp)      | Mesh.cpp            | Diterapkan |
+
+================================================================================

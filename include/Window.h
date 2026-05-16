@@ -19,6 +19,9 @@ public:
     inline unsigned int getWidth() { return WIN_WIDTH; }
     inline unsigned int getHeight() { return WIN_HEIGHT; }
 
+    void showCursor() { glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); }
+    void hideCursor() { glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); }
+
     Window();
     ~Window();
 };

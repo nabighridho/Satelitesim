@@ -1,0 +1,1469 @@
+====================================================================
+PANDUAN PRESENTASI LENGKAP — SATELLITE SIMULATOR
+Pembedahan Kode Sumber Baris per Baris
+====================================================================
+
+Nabigh Nailur Ridho — 240533608084
+S1 Pendidikan Teknik Informatika — Universitas Negeri Malang
+Dosen: Ir. Azhar Ahmad Smaragdina, M.Pd.
+
+====================================================================
+DAFTAR ISI
+====================================================================
+BAGIAN 1  — Window.cpp (Inisialisasi Jendela & OpenGL Context)
+BAGIAN 2  — Renderer.cpp (Sistem Debugging GPU)
+BAGIAN 3  — shader.cpp (Kompilasi & Manajemen Program Shader)
+BAGIAN 4  — textures.cpp (Pemuatan & Pengelolaan Tekstur)
+BAGIAN 5  — Mesh.cpp (Geometri Prosedural & Model Loader)
+BAGIAN 6  — SceneObject.cpp (Entitas Objek 3D Multi-Part)
+BAGIAN 7  — Camera.cpp (Sistem Kamera Free Fly & Chase)
+BAGIAN 8  — Starfield.cpp (Generasi Bintang Prosedural)
+BAGIAN 9  — SatelliteScene.cpp (Inti Simulasi — Konstruksi Dunia)
+BAGIAN 10 — SatelliteScene.cpp (Inti Simulasi — Update & Render)
+BAGIAN 11 — MainMenu.cpp (Antarmuka Menu Utama)
+BAGIAN 12 — InfoPanel.cpp (HUD Informasi Real-Time)
+BAGIAN 13 — main.cpp (Titik Masuk & Game Loop)
+BAGIAN 14 — Shader Files (Semua Program Shader GLSL)
+
+
+====================================================================
+BAGIAN 1 — Window.cpp
+Inisialisasi Jendela Aplikasi dan Konteks OpenGL
+====================================================================
+
+File ini adalah fondasi paling dasar dari seluruh aplikasi. Tanpa
+jendela, tidak ada tempat untuk menggambar apapun.
+
+```cpp
+#include "Window.h"
+```
+Penjelasan: Menyertakan header Window.h yang berisi deklarasi kelas
+Window beserta konstanta WIN_WIDTH dan WIN_HEIGHT, serta menyertakan
+library GLFW dan GLAD secara tidak langsung.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: framebuffer_size_callback
+────────────────────────────────────────────────────────────────────
+```cpp
+void Window::framebuffer_size_callback(GLFWwindow *window, int width, int height)
+{
+    glViewport(0, 0, width, height);
+}
+```
+Penjelasan:
+Fungsi callback ini dipanggil secara otomatis oleh GLFW setiap kali
+pengguna mengubah ukuran jendela (resize). Parameter `width` dan
+`height` adalah dimensi baru framebuffer dalam piksel. Perintah
+`glViewport(0, 0, width, height)` memberitahu OpenGL untuk memetakan
+ulang area rendering agar sesuai dengan dimensi jendela baru.
+Koordinat (0,0) menandakan sudut kiri bawah viewport. Tanpa callback
+ini, jika jendela di-resize, gambar akan tetap terrender pada
+ukuran lama dan muncul distorsi atau area kosong.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: Window::Window() — Konstruktor
+────────────────────────────────────────────────────────────────────
+```cpp
+Window::Window()
+{
+    if (!glfwInit())
+    {
+        cout << "Failed to initialize GLFW" << endl;
+    }
+```
+Penjelasan:
+`glfwInit()` menginisialisasi library GLFW yang bertindak sebagai
+jembatan antara program C++ dan sistem operasi Windows untuk
+manajemen jendela. Jika gagal (return false), pesan error dicetak.
+GLFW harus diinisialisasi sebelum fungsi GLFW lainnya dipanggil.
+
+```cpp
+    glfwWindowHint(GLFW_SAMPLES, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+```
+Penjelasan:
+- `GLFW_SAMPLES, 4`: Mengaktifkan Multi-Sample Anti-Aliasing (MSAA)
+  4x untuk menghaluskan tepian objek yang bergerigi (jagged edges).
+- `CONTEXT_VERSION_MAJOR/MINOR`: Menetapkan versi OpenGL 4.6,
+  versi terbaru yang mendukung fitur modern seperti compute shader
+  dan debug output.
+- `OPENGL_CORE_PROFILE`: Menggunakan profil Core yang hanya
+  mengizinkan fungsi OpenGL modern. Fungsi lawas (deprecated)
+  seperti glBegin/glEnd tidak tersedia di profil ini.
+
+```cpp
+    window = glfwCreateWindow(WIN_WIDTH, WIN_HEIGHT, "Aqua Satellite Simulation", NULL, NULL);
+    if (window == NULL)
+    {
+        cout << "Failed to open GLFW window" << endl;
+        glfwTerminate();
+    }
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);
+```
+Penjelasan:
+- `glfwCreateWindow`: Membuat jendela berukuran WIN_WIDTH x
+  WIN_HEIGHT piksel dengan judul "Aqua Satellite Simulation".
+  Parameter NULL pertama berarti tidak fullscreen, NULL kedua
+  berarti tidak berbagi konteks dengan jendela lain.
+- `glfwMakeContextCurrent`: Mengikat konteks OpenGL ke jendela ini.
+  Semua perintah OpenGL selanjutnya akan menggambar ke jendela ini.
+- `glfwSwapInterval(1)`: Mengaktifkan V-Sync (Vertical Sync).
+  Angka 1 berarti swap buffer disinkronkan dengan refresh rate
+  monitor (biasanya 60 Hz), mencegah screen tearing.
+
+```cpp
+    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+    {
+        cout << "Failed to initialize GLAD" << endl;
+    }
+
+    glViewport(0, 0, WIN_WIDTH, WIN_HEIGHT);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+}
+```
+Penjelasan:
+- `gladLoadGLLoader`: GLAD memuat semua pointer fungsi OpenGL
+  dari driver GPU. Tanpa langkah ini, pemanggilan fungsi seperti
+  `glClear` atau `glDrawArrays` akan crash karena alamat fungsinya
+  belum diketahui oleh program.
+- `glViewport`: Menetapkan area rendering awal sesuai ukuran jendela.
+- `glfwSetFramebufferSizeCallback`: Mendaftarkan fungsi callback
+  resize yang sudah dibuat sebelumnya.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: Window::~Window() — Destruktor
+────────────────────────────────────────────────────────────────────
+```cpp
+Window::~Window()
+{
+    glfwTerminate();
+}
+```
+Penjelasan:
+Destruktor dipanggil otomatis saat objek Window keluar dari scope
+(akhir fungsi main). `glfwTerminate()` membersihkan semua resource
+GLFW: menutup jendela, membebaskan memori internal, dan melepaskan
+koneksi ke sistem windowing OS. Ini menjamin tidak ada memory leak.
+
+
+====================================================================
+BAGIAN 2 — Renderer.cpp
+Sistem Debugging GPU OpenGL
+====================================================================
+
+File ini menyediakan infrastruktur debugging yang menangkap pesan
+error dan warning langsung dari driver GPU.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: MessageCallback
+────────────────────────────────────────────────────────────────────
+```cpp
+void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
+                                GLsizei length, const GLchar *message, const void *userParam)
+{
+#ifdef GL_DEBUG_OUTPUT
+    if (severity == GL_DEBUG_SEVERITY_NOTIFICATION || severity == GL_DEBUG_SEVERITY_LOW
+        || severity == GL_DEBUG_SEVERITY_MEDIUM)
+        return;
+
+    std::cerr << "OpenGL ";
+    if (severity == GL_DEBUG_SEVERITY_HIGH)
+        std::cerr << "ERROR";
+    else
+        std::cerr << "WARNING";
+    std::cerr << " (" << id << "): " << message << std::endl;
+#endif
+}
+```
+Penjelasan:
+Fungsi ini adalah callback yang dipanggil otomatis oleh driver OpenGL
+setiap kali terjadi event internal GPU. Parameter `severity`
+menentukan tingkat keparahan:
+- NOTIFICATION/LOW/MEDIUM: Diabaikan (return langsung) karena
+  biasanya hanya info performa, bukan error kritis.
+- HIGH: Error serius seperti shader compilation failure, invalid
+  operation, atau out-of-memory. Dicetak ke stderr.
+Macro `GLAPIENTRY` memastikan calling convention sesuai dengan API
+OpenGL. Ifdef `GL_DEBUG_OUTPUT` memastikan kode hanya aktif jika
+driver mendukung extension debugging.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: enableDebugging
+────────────────────────────────────────────────────────────────────
+```cpp
+void enableDebugging()
+{
+#ifdef GL_DEBUG_OUTPUT
+    glEnable(GL_DEBUG_OUTPUT);
+    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    glDebugMessageCallback(MessageCallback, nullptr);
+    glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION,
+                          0, nullptr, GL_FALSE);
+#endif
+}
+```
+Penjelasan:
+- `GL_DEBUG_OUTPUT`: Mengaktifkan fitur debug output dari driver.
+- `GL_DEBUG_OUTPUT_SYNCHRONOUS`: Memaksa pesan debug dikirim secara
+  sinkron, artinya callback dipanggil tepat pada baris kode yang
+  menyebabkan error, mempermudah debugging dengan breakpoint.
+- `glDebugMessageCallback`: Mendaftarkan fungsi MessageCallback.
+- `glDebugMessageControl`: Mematikan pesan NOTIFICATION agar
+  konsol tidak dipenuhi pesan informasi yang tidak penting.
+
+
+====================================================================
+BAGIAN 3 — shader.cpp
+Kompilasi dan Manajemen Program Shader GPU
+====================================================================
+
+Shader adalah program kecil yang berjalan di GPU. File ini menangani
+seluruh siklus hidup shader: baca file → kompilasi → link → upload
+data uniform.
+
+────────────────────────────────────────────────────────────────────
+Konstruktor: Shader::Shader
+────────────────────────────────────────────────────────────────────
+```cpp
+Shader::Shader(const std::string &vertexPath, const std::string &fragmentPath)
+{
+    std::string vertexShader = readFromFile(vertexPath);
+    std::string fragmentShader = readFromFile(fragmentPath);
+    ID = createShader(vertexShader, fragmentShader);
+    if (ID == 0)
+    {
+        std::cerr << "Failed to create shader program!" << std::endl;
+    }
+}
+```
+Penjelasan:
+Konstruktor menerima dua path file: vertex shader dan fragment
+shader. Kedua file dibaca menjadi string C++, lalu dikirim ke
+`createShader` untuk dikompilasi dan di-link menjadi satu program
+GPU. Variabel `ID` menyimpan handle integer yang digunakan OpenGL
+untuk mengidentifikasi program shader ini. Jika ID = 0, berarti
+proses gagal total.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: readFromFile
+────────────────────────────────────────────────────────────────────
+```cpp
+std::string Shader::readFromFile(const std::string &path)
+{
+    std::ifstream file(path);
+    if (!file)
+    {
+        std::cerr << "Error opening file: " << path << std::endl;
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+```
+Penjelasan:
+Membaca seluruh isi file shader GLSL ke dalam string. `rdbuf()`
+mengakses buffer internal ifstream, dan operator `<<` menyalin
+seluruh isinya ke stringstream dalam satu operasi yang efisien
+tanpa perlu membaca baris per baris.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: compileShader
+────────────────────────────────────────────────────────────────────
+```cpp
+unsigned int Shader::compileShader(unsigned int type, const std::string &source)
+{
+    unsigned int id = glCreateShader(type);
+    const char *src = source.c_str();
+    glShaderSource(id, 1, &src, nullptr);
+    glCompileShader(id);
+
+    int result;
+    glGetShaderiv(id, GL_COMPILE_STATUS, &result);
+    if (result == GL_FALSE)
+    {
+        int length;
+        glGetShaderiv(id, GL_INFO_LOG_LENGTH, &length);
+        char *message = (char *)alloca(length * sizeof(char));
+        glGetShaderInfoLog(id, length, &length, message);
+        cout << "Failed to compile "
+             << (type == GL_VERTEX_SHADER ? "vertex" : "fragment")
+             << " shader!" << endl;
+        cout << message << "\n";
+        glDeleteShader(id);
+        return 0;
+    }
+    return id;
+}
+```
+Penjelasan:
+- `glCreateShader(type)`: Membuat objek shader kosong di GPU.
+  `type` bisa GL_VERTEX_SHADER atau GL_FRAGMENT_SHADER.
+- `glShaderSource`: Mengirim kode sumber GLSL ke objek shader.
+- `glCompileShader`: Meminta driver GPU untuk mengompilasi kode
+  GLSL menjadi instruksi mesin GPU (bytecode/assembly GPU).
+- `glGetShaderiv(GL_COMPILE_STATUS)`: Mengecek apakah kompilasi
+  berhasil. Jika gagal, `glGetShaderInfoLog` mengambil pesan
+  error detail dari compiler GPU (misalnya syntax error, tipe
+  data tidak cocok, uniform tidak ditemukan).
+- `alloca`: Mengalokasikan memori di stack (bukan heap) untuk
+  efisiensi, karena pesan error hanya dibutuhkan sementara.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: createShader
+────────────────────────────────────────────────────────────────────
+```cpp
+unsigned int Shader::createShader(const string &vertexShader, const string &fragmentShader)
+{
+    unsigned int program = glCreateProgram();
+    unsigned int vs = compileShader(GL_VERTEX_SHADER, vertexShader);
+    unsigned int fs = compileShader(GL_FRAGMENT_SHADER, fragmentShader);
+
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
+    glValidateProgram(program);
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    int success;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success)
+    {
+        char infoLog[512];
+        glGetProgramInfoLog(program, 512, NULL, infoLog);
+        std::cerr << "ERROR::SHADER::PROGRAM::LINKING_FAILED\n"
+                  << infoLog << std::endl;
+    }
+
+    return program;
+}
+```
+Penjelasan:
+- `glCreateProgram`: Membuat objek program shader kosong di GPU.
+  Program adalah gabungan dari vertex shader + fragment shader.
+- `glAttachShader`: Menghubungkan shader yang sudah dikompilasi
+  ke program.
+- `glLinkProgram`: Menghubungkan (linking) output vertex shader
+  dengan input fragment shader. Proses ini memastikan variabel
+  `out` dari vertex shader cocok dengan variabel `in` di
+  fragment shader (nama dan tipe harus sama persis).
+- `glValidateProgram`: Memvalidasi program dalam konteks OpenGL
+  saat ini (optional, untuk debugging).
+- `glDeleteShader`: Menghapus objek shader individual karena
+  sudah di-copy ke dalam program. Ini menghemat memori GPU.
+
+────────────────────────────────────────────────────────────────────
+Fungsi-Fungsi Uniform
+────────────────────────────────────────────────────────────────────
+```cpp
+void Shader::setUniform4f(const std::string &name, float v0, float v1, float v2, float v3)
+{
+    bind();
+    glUniform4f(getUniformLocations(name), v0, v1, v2, v3);
+}
+
+void Shader::setUniform3f(const std::string &name, float v0, float v1, float v2)
+{
+    bind();
+    glUniform3f(getUniformLocations(name), v0, v1, v2);
+}
+
+void Shader::setUniform1f(const std::string &name, float value)
+{
+    bind();
+    glUniform1f(getUniformLocations(name), value);
+}
+
+void Shader::setUniform1i(const std::string &name, int value)
+{
+    bind();
+    glUniform1i(getUniformLocations(name), value);
+}
+
+void Shader::setUniformMatrix4fv(const std::string &name, glm::mat4 mat, bool transpose)
+{
+    bind();
+    glUniformMatrix4fv(getUniformLocations(name), 1, transpose, glm::value_ptr(mat));
+}
+
+void Shader::setUniformMatrix3fv(const std::string &name, glm::mat3 mat, bool transpose)
+{
+    bind();
+    glUniformMatrix3fv(getUniformLocations(name), 1, transpose, glm::value_ptr(mat));
+}
+
+unsigned int Shader::getUniformLocations(const std::string &name)
+{
+    bind();
+    return glGetUniformLocation(ID, name.c_str());
+}
+```
+Penjelasan:
+Uniform adalah variabel global yang dikirim dari CPU (program C++)
+ke GPU (shader GLSL) setiap frame. Setiap fungsi setUniform:
+1. Memanggil `bind()` yang mengaktifkan program shader ini
+   (`glUseProgram(ID)`) — wajib sebelum mengirim uniform.
+2. `getUniformLocations` mencari lokasi integer dari uniform
+   berdasarkan namanya di kode GLSL menggunakan
+   `glGetUniformLocation`. Jika nama tidak ditemukan, return -1.
+3. `glUniformXXX` mengirim data ke lokasi tersebut di GPU:
+   - `1f`: satu float (misal: shininess, alpha, time)
+   - `3f`: tiga float (misal: posisi vec3, warna RGB)
+   - `4f`: empat float (misal: warna RGBA)
+   - `1i`: satu integer (misal: texture unit, boolean flag)
+   - `Matrix4fv`: matriks 4x4 (misal: model, view, projection)
+   - `Matrix3fv`: matriks 3x3 (misal: normal matrix)
+   `glm::value_ptr` mengkonversi matriks GLM menjadi pointer
+   float mentah yang dipahami oleh OpenGL.
+
+
+====================================================================
+BAGIAN 4 — textures.cpp
+Pemuatan dan Pengelolaan Tekstur GPU
+====================================================================
+
+────────────────────────────────────────────────────────────────────
+Konstruktor: Texture::Texture
+────────────────────────────────────────────────────────────────────
+```cpp
+Texture::Texture(const std::string &path)
+    : filepath(path),
+      localbuffer(nullptr), ID(0), width(0), height(0), BPP(0)
+{
+    stbi_set_flip_vertically_on_load(1);
+    localbuffer = stbi_load(path.c_str(), &width, &height, &BPP, 4);
+
+    glGenTextures(1, &ID);
+    glBindTexture(GL_TEXTURE_2D, ID);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    if (!localbuffer)
+    {
+        printf("Failed to load texture: %s\n", path.c_str());
+        return;
+    }
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, localbuffer);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    stbi_image_free(localbuffer);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+```
+Penjelasan:
+- `stbi_set_flip_vertically_on_load(1)`: Membalik gambar secara
+  vertikal karena OpenGL mengharapkan piksel dimulai dari bawah
+  (bottom-left origin), sementara format gambar biasa (PNG/JPG)
+  dimulai dari atas (top-left origin).
+- `stbi_load`: Library stb_image memuat file gambar ke RAM CPU.
+  Parameter `4` memaksa output 4 channel (RGBA). `width`, `height`,
+  dan `BPP` (Bytes Per Pixel) diisi otomatis.
+- `glGenTextures`: Membuat objek tekstur di GPU dan mendapat ID.
+- `glBindTexture(GL_TEXTURE_2D, ID)`: Mengaktifkan tekstur ini
+  untuk konfigurasi selanjutnya.
+- Parameter Wrapping:
+  - `GL_CLAMP_TO_EDGE`: Jika koordinat UV melebihi 0-1, piksel
+    terakhir di tepi diulang. Mencegah artefak garis di border.
+- Parameter Filtering:
+  - `GL_NEAREST_MIPMAP_NEAREST` (minification): Menggunakan
+    mipmap terdekat dengan filtering nearest-neighbor. Cepat
+    tapi bisa terlihat pixelated.
+  - `GL_NEAREST` (magnification): Saat zoom in, piksel tetap
+    tajam tanpa blur (cocok untuk pixel art/bitmap font).
+- `glTexImage2D`: Upload data piksel dari RAM CPU ke VRAM GPU.
+  Format internal GL_RGBA8 = 8 bit per channel, 32 bit per piksel.
+- `glGenerateMipmap`: Membuat versi-versi kecil dari tekstur
+  (½, ¼, ⅛ ukuran) untuk rendering yang lebih cepat saat objek
+  jauh dari kamera.
+- `stbi_image_free`: Membebaskan salinan di RAM CPU karena data
+  sudah ada di VRAM GPU.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: bind & unbind
+────────────────────────────────────────────────────────────────────
+```cpp
+void Texture::bind(unsigned int slot) const
+{
+    glActiveTexture(GL_TEXTURE0 + slot);
+    glBindTexture(GL_TEXTURE_2D, ID);
+}
+
+void Texture::unbind() const
+{
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+```
+Penjelasan:
+- `glActiveTexture(GL_TEXTURE0 + slot)`: GPU memiliki beberapa
+  "slot" tekstur (minimal 16). Slot 0 biasanya untuk diffuse map,
+  slot 1 untuk normal map, dst. Fungsi ini memilih slot mana
+  yang akan diisi.
+- `glBindTexture`: Memasang tekstur ke slot yang sudah dipilih.
+- `unbind`: Melepas tekstur dari slot aktif (safety measure).
+
+
+====================================================================
+BAGIAN 5 — Mesh.cpp
+Geometri Prosedural dan Model Loader (Assimp)
+====================================================================
+
+File terbesar untuk geometri. Berisi: manajemen buffer GPU,
+generator bentuk prosedural, dan loader model 3D via Assimp.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: upload — Upload Vertex Data ke GPU
+────────────────────────────────────────────────────────────────────
+```cpp
+void Mesh::upload(const std::vector<PhongVertex> &vertices,
+                  const std::vector<unsigned int> &indices)
+{
+    indexCount = indices.size();
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+    glBindVertexArray(VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(PhongVertex), vertices.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(PhongVertex), (void*)offsetof(PhongVertex, position));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(PhongVertex), (void*)offsetof(PhongVertex, normal));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(PhongVertex), (void*)offsetof(PhongVertex, texCoord));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+}
+```
+Penjelasan:
+Struct PhongVertex = posisi(vec3) + normal(vec3) + texCoord(vec2) = 32 byte.
+- VAO: Menyimpan konfigurasi atribut vertex. Bind VAO = semua setting aktif.
+- VBO: Data vertex di VRAM GPU. EBO: Indeks segitiga agar vertex bisa dishare.
+- GL_STATIC_DRAW: Data tidak berubah, GPU optimasi ke memori cepat.
+- glVertexAttribPointer: Location 0=posisi(3f), 1=normal(3f), 2=texCoord(2f).
+
+────────────────────────────────────────────────────────────────────
+Fungsi: createSphere — Generator Bola
+────────────────────────────────────────────────────────────────────
+```cpp
+Mesh Mesh::createSphere(float radius, int segments, int rings) {
+    for (int ring = 0; ring <= rings; ring++) {
+        float phi = M_PI * ring / rings;
+        for (int seg = 0; seg <= segments; seg++) {
+            float theta = 2.0f * M_PI * seg / segments;
+            glm::vec3 pos(radius*sinf(phi)*cosf(theta), radius*cosf(phi), radius*sinf(phi)*sinf(theta));
+            glm::vec3 normal = glm::normalize(pos);
+            glm::vec2 uv((float)seg/segments, (float)ring/rings);
+            verts.push_back({pos, normal, uv});
+        }
+    }
+    // Indeks: pasangan segitiga dari grid vertex bersebelahan
+}
+```
+Penjelasan:
+Bola dibuat dari grid titik di koordinat bola. Formula: x=r·sin(φ)·cos(θ),
+y=r·cos(φ), z=r·sin(φ)·sin(θ). Normal = normalize(pos) karena pada bola
+berpusat di origin, arah normal = arah posisi. Bumi: 64x32, Matahari: 32x16.
+
+────────────────────────────────────────────────────────────────────
+Fungsi: loadModel — Loader Assimp untuk GLB/OBJ
+────────────────────────────────────────────────────────────────────
+```cpp
+std::vector<GltfMesh> loadModel(const std::string &path, float scale) {
+    Assimp::Importer importer;
+    const aiScene *scene = importer.ReadFile(path,
+        aiProcess_Triangulate | aiProcess_GenSmoothNormals |
+        aiProcess_JoinIdenticalVertices | aiProcess_PreTransformVertices);
+    // Normalisasi model ke 1 unit, lalu scale
+    for (auto &v : raw.verts) v.position = (v.position - center) * normalize * scale;
+}
+```
+Penjelasan:
+Assimp memuat GLB/OBJ, triangulasi polygon, generate normal, dan gabung vertex.
+Model dinormalisasi ke bounding box 1 unit lalu dikalikan scale untuk ukuran scene.
+Tekstur embedded di GLB diekstrak via stbi_load_from_memory.
+
+
+====================================================================
+BAGIAN 6 — SceneObject.cpp
+Entitas Objek 3D Multi-Part dengan Material
+====================================================================
+
+```cpp
+void SceneObject::draw(Shader &shader) const {
+    for (const auto &part : parts) {
+        glm::mat4 model = worldTransform * part.localTransform;
+        glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model)));
+        shader.setUniformMatrix4fv("u_model", model);
+        shader.setUniformMatrix3fv("u_normalMatrix", normalMatrix);
+        // Upload material properties dan bind texture jika ada
+        part.mesh.draw();
+    }
+}
+```
+Penjelasan:
+SceneObject terdiri dari beberapa parts dengan material berbeda. Misal: satelit
+= badan(silver) + panel surya(biru) + antena(putih). Model matrix = worldTransform
+× localTransform. Normal matrix = transpose(inverse(mat3(model))) agar normal tetap
+tegak lurus setelah transformasi non-uniform.
+
+
+====================================================================
+BAGIAN 7 — Camera.cpp
+Sistem Kamera Free Fly dan Chase Mode
+====================================================================
+
+────────────────────────────────────────────────────────────────────
+Konstruktor
+────────────────────────────────────────────────────────────────────
+```cpp
+Camera::Camera(Window &window)
+    : cameraPos(0.0f, 15.0f, 45.0f), cameraUp(0.0f, 1.0f, 0.0f),
+      fov(60.0f), targetFov(60.0f), chaseMode(false)
+{
+    cameraFront = glm::normalize(glm::vec3(0.0f) - cameraPos);
+    yaw = glm::degrees(atan2f(cameraFront.z, cameraFront.x));
+    pitch = glm::degrees(asinf(cameraFront.y));
+    view = glm::lookAt(cameraPos, glm::vec3(0.0f), cameraUp);
+    projection = glm::perspective(glm::radians(fov), aspect, 0.1f, 2000.0f);
+}
+```
+Penjelasan:
+Kamera mulai di (0,15,45) menatap Bumi. Yaw/pitch diekstrak dari front vector
+dengan atan2 dan asin. Near plane 0.1, far plane 2000 (cukup untuk matahari di 200).
+
+────────────────────────────────────────────────────────────────────
+Free Fly Mode (WASD + Q/E + Shift Sprint)
+────────────────────────────────────────────────────────────────────
+```cpp
+float speed = 8.0f * deltaTime;
+if (SHIFT) speed *= 2.5f;
+glm::vec3 right = glm::normalize(glm::cross(cameraFront, cameraUp));
+if (W) cameraPos += speed * cameraFront;
+if (S) cameraPos -= speed * cameraFront;
+if (A) cameraPos -= right * speed;
+if (D) cameraPos += right * speed;
+if (Q) cameraPos -= cameraUp * speed;
+if (E) cameraPos += cameraUp * speed;
+```
+Penjelasan:
+Cross product front×up = vektor kanan untuk strafing. Delta time menjamin
+kecepatan konsisten di berbagai frame rate. Shift = sprint 2.5x.
+
+────────────────────────────────────────────────────────────────────
+Chase Mode (Mengikuti Satelit)
+────────────────────────────────────────────────────────────────────
+```cpp
+if (chaseMode) {
+    glm::vec3 offset = glm::normalize(chaseTarget) * 6.0f + glm::vec3(0, 3, 0);
+    glm::vec3 desiredPos = chaseTarget + offset;
+    float smoothSpeed = std::min(1.0f, 4.0f * deltaTime);
+    cameraPos += (desiredPos - cameraPos) * smoothSpeed;
+    view = glm::lookAt(cameraPos, chaseTarget, up);
+}
+```
+Penjelasan:
+Kamera melayang 6 unit di belakang dan 3 unit di atas satelit. Lerp smoothing
+mencegah perpindahan mendadak yang menyentak. lookAt selalu menatap satelit.
+
+────────────────────────────────────────────────────────────────────
+Mouse Look dan Scroll Zoom
+────────────────────────────────────────────────────────────────────
+```cpp
+// Mouse: Euler angles → direction vector
+yaw += xoffset * 0.1f;
+pitch += yoffset * 0.1f;
+pitch = clamp(pitch, -89, 89);
+front.x = cos(radians(yaw)) * cos(radians(pitch));
+front.y = sin(radians(pitch));
+front.z = sin(radians(yaw)) * cos(radians(pitch));
+
+// Scroll: FOV zoom dengan lerp
+targetFov -= yoffset * 3.0f;
+targetFov = clamp(targetFov, 20, 120);
+fov += (targetFov - fov) * min(1.0f, 8.0f * dt);
+```
+Penjelasan:
+Pitch di-clamp ±89° mencegah gimbal lock visual. FOV 20°=zoom in max,
+120°=zoom out max. Lerp pada FOV memberi efek zoom sinematik yang mulus.
+
+
+====================================================================
+BAGIAN 8 — Starfield.cpp
+Generasi 2500 Bintang Prosedural
+====================================================================
+
+```cpp
+Starfield::Starfield(int numStars) {
+    for (int i = 0; i < numStars; i++) {
+        float theta = 2.0f * M_PI * randFloat(seed);
+        float phi = acosf(2.0f * randFloat(seed) - 1.0f);  // Distribusi seragam Archimedes
+        float x = 800 * sinf(phi) * cosf(theta);
+        float y = 800 * sinf(phi) * sinf(theta);
+        float z = 800 * cosf(phi);
+        float brightness = 0.3f + 0.7f * randFloat(seed);
+        float size = 1.0f + 2.5f * randFloat(seed);
+        if (randFloat(seed) < 0.05f) {  // 5% bintang raksasa
+            brightness = 0.9f; size = 3.0f + 2.0f * randFloat(seed);
+        }
+    }
+}
+
+void Starfield::render(const Camera &camera, float time) {
+    glDepthMask(GL_FALSE);  // Bintang selalu di belakang
+    glDrawArrays(GL_POINTS, 0, starCount);
+    glDepthMask(GL_TRUE);
+}
+```
+Penjelasan:
+phi = acos(2*rand-1) = distribusi seragam Archimedes (tanpa ini, bintang menumpuk
+di kutub). Seed 42 = deterministik. glDepthMask(FALSE) = bintang tidak menutupi
+objek. 5% bintang super terang untuk variasi. Efek kedip via shader (Bagian 14).
+
+
+====================================================================
+BAGIAN 9 — SatelliteScene.cpp (Bagian 1)
+Konstruksi Dunia: Bumi, Matahari, Bulan, Satelit, Stasiun Darat
+====================================================================
+
+────────────────────────────────────────────────────────────────────
+Konstruktor: Definisi Cahaya dan Orbit
+────────────────────────────────────────────────────────────────────
+```cpp
+SatelliteScene::SatelliteScene()
+{
+    // Cahaya Matahari Direksional (sinar paralel, tanpa atenuasi)
+    glm::vec3 sunPos(200.0f, 100.0f, 200.0f);
+    sunLight = {
+        glm::normalize(-sunPos),                // arah menuju scene
+        glm::vec3(0.08f, 0.08f, 0.10f),         // ambient (gelap)
+        glm::vec3(1.0f,  0.95f, 0.85f),         // diffuse (hangat kuning)
+        glm::vec3(0.5f,  0.5f,  0.45f)          // specular
+    };
+    fillLight = {
+        glm::vec3(-100.0f, -40.0f, -100.0f),    // posisi berlawanan matahari
+        glm::vec3(0.0f),                          // tanpa ambient
+        glm::vec3(0.06f, 0.08f, 0.12f),          // diffuse sangat redup biru
+        glm::vec3(0.0f), 1.0f, 0.0f, 0.0f        // tanpa atenuasi
+    };
+
+    // Definisi Orbit: { startAngle, speed, inclination, radius, pos }
+    orbits.push_back({ 0.0f,          0.50f, glm::radians(25.0f),  15.0f, {} }); // Aqua
+    orbits.push_back({ glm::pi<float>(), 0.38f, glm::radians(-18.0f), 17.5f, {} }); // ICESat-2
+    orbits.push_back({ glm::half_pi<float>(), 0.72f, glm::radians(10.0f),  12.5f, {} }); // Landsat 8
+}
+```
+Penjelasan:
+Cahaya matahari dimodelkan sebagai Directional Light — sinar sejajar
+tanpa atenuasi jarak, sesuai sifat cahaya matahari nyata. Arah cahaya
+= normalize(-sunPos) mengarah ke pusat scene. Fill light memberikan
+iluminasi lemah biru dari sisi berlawanan agar sisi gelap tidak
+sepenuhnya hitam. Tiga orbit satelit didefinisikan dengan parameter:
+startAngle (posisi awal), speed (laju orbital), inclination (kemiringan
+orbital dalam radian), dan radius (jarak dari pusat Bumi).
+
+────────────────────────────────────────────────────────────────────
+buildEarth — Konstruksi Planet Bumi
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::buildEarth() {
+    earth = std::make_unique<SceneObject>("Earth", "", glm::vec3(0.0f), 0.0f);
+    auto parts = loadModel("../res/models/Earth_1_12756.glb", EARTH_RADIUS * 2.0f);
+    for (auto &gm : parts) {
+        Material mat;
+        if (gm.textureID != 0)
+            mat = makeMat({0.15f,0.15f,0.15f}, {1.0f,1.0f,1.0f}, {0.15f,0.20f,0.30f}, 24.0f);
+        else {
+            glm::vec3 c = gm.color;
+            mat = makeMat(c*0.15f, c*0.85f, {0.15f,0.20f,0.30f}, 24.0f);
+        }
+        mat.textureID = gm.textureID;
+        earth->addPart(std::move(gm.mesh), mat);
+    }
+}
+```
+Penjelasan:
+Bumi dimuat dari model GLB NASA bertekstur dan diskalakan ke diameter
+EARTH_RADIUS*2. Jika mesh punya tekstur, diffuse diset putih (1,1,1)
+agar tekstur tampil 100%. Specular (0.15,0.20,0.30) memberi kilau biru
+pada lautan. Shininess 24 = kilau moderat, tidak terlalu tajam.
+
+────────────────────────────────────────────────────────────────────
+buildSun — Konstruksi Matahari Emisif
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::buildSun() {
+    glm::vec3 sunPos(200.0f, 100.0f, 200.0f);
+    sun = std::make_unique<SceneObject>("Sun", "", sunPos, 0.0f);
+    GLuint sunTex = loadTexture("../res/models/sun_texture.jpg");
+    Material mat = makeMat({0,0,0}, {1,1,1}, {0,0,0}, 1.0f);
+    mat.textureID = sunTex;
+    sun->addPart(Mesh::createSphere(18.0f, 32, 16), mat);
+}
+```
+Penjelasan:
+Matahari = bola radius 18 di posisi (200,100,200). Ambient dan specular
+nol karena matahari tidak menerima cahaya — ia MEMANCARKAN cahaya sendiri
+via uniform u_emissive saat rendering (nilai 1.4, 1.1, 0.45 = over-bright).
+
+────────────────────────────────────────────────────────────────────
+buildMoon — Konstruksi Bulan NASA
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::buildMoon() {
+    float moonScale = EARTH_RADIUS * 2.0f * 0.27f;  // Rasio nyata ~0.27
+    auto parts = loadModel("../res/models/Moon_NASA_LRO_8k_Topo_Small.glb", moonScale);
+    // Material: diffuse tinggi (0.9), specular rendah (0.1) = permukaan regolith
+}
+```
+Penjelasan:
+Bulan diskalakan sesuai rasio nyata Bulan/Bumi (0.27). Tekstur topografi
+dari NASA Lunar Reconnaissance Orbiter. Specular rendah karena regolith
+bulan memantulkan cahaya secara difus (tidak mengkilap).
+
+────────────────────────────────────────────────────────────────────
+buildSatellites — Konstruksi 3 Satelit dari Model GLB
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::buildSatellites() {
+    SatDef defs[] = {
+        { "Aqua",      "../res/models/aqua.glb",     2.0f },
+        { "ICESat-2",  "../res/models/icesat2.glb",  2.0f },
+        { "Landsat 8", "../res/models/landsat8.glb", 2.5f },
+    };
+    for (int i = 0; i < orbits.size(); i++) {
+        auto parts = loadGLBColored(defs[i].glbPath, defs[i].scale);
+        // Material: specular tinggi (0.5) + shininess 32 = kilau panel logam
+    }
+}
+```
+Penjelasan:
+Setiap satelit dimuat dari model GLB terpisah. Specular 0.5 dan shininess 32
+mereplikasi pantulan logam dan komposit pada badan wahana antariksa.
+
+────────────────────────────────────────────────────────────────────
+buildGroundStation — Stasiun Darat di Indonesia
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::buildGroundStation() {
+    groundStation = std::make_unique<SceneObject>("Ground Station", "", groundStationPos, 0.0f);
+    auto parts = loadModel("../res/models/ground_station/source/Ground Satellite 2.obj", 0.5f);
+    // Fallback: kotak + tiang + piringan jika model gagal dimuat
+}
+```
+Penjelasan:
+Stasiun darat dimuat dari model OBJ. Posisi dikunci di koordinat Indonesia
+(Lat -2.5°, Lon 115°) dan berputar bersama rotasi Bumi.
+
+────────────────────────────────────────────────────────────────────
+setLights — Upload Pencahayaan ke GPU
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::setLights(Shader &shader) const {
+    // Directional Light (Matahari)
+    shader.setUniform3f("dirLight.direction", sunLight.direction.x, ...);
+    shader.setUniform3f("dirLight.ambient",   sunLight.ambient.r, ...);
+    shader.setUniform3f("dirLight.diffuse",   sunLight.diffuse.r, ...);
+    shader.setUniform3f("dirLight.specular",  sunLight.specular.r, ...);
+
+    // Point Light [0]: Fill light
+    uploadPL(0, fillLight);
+
+    // Point Light [1]: Cahaya bulan dinamis berdasarkan fase
+    glm::vec3 moonPos = moon->getWorldTransform()[3];
+    glm::vec3 moonToEarth = glm::normalize(-moonPos);
+    glm::vec3 sunDir = glm::normalize(-sunLight.direction);
+    float phase = glm::clamp(glm::dot(sunDir, moonToEarth), 0.0f, 1.0f);
+    float moonIntensity = phase * 0.12f;
+    PointLight moonLight = {
+        moonPos, glm::vec3(0),
+        glm::vec3(0.08f,0.10f,0.14f) * moonIntensity,  // biru-putih dingin
+        glm::vec3(0), 1.0f, 0.007f, 0.0002f
+    };
+    uploadPL(1, moonLight);
+}
+```
+Penjelasan:
+Sistem pencahayaan multi-layer: 1 Directional (matahari) + 2 Point Lights
+(fill + bulan). Cahaya bulan bersifat Phase-Dependent: dot product antara arah
+matahari dan arah bulan-ke-bumi menentukan intensitas. Purnama = dot tinggi =
+terang. Bulan baru = dot rendah = gelap. Warna biru-putih dingin (0.08,0.10,0.14).
+
+
+====================================================================
+BAGIAN 10 — SatelliteScene.cpp (Bagian 2)
+Update Fisika dan Rendering Scene
+====================================================================
+
+────────────────────────────────────────────────────────────────────
+update() — Perbarui Fisika Setiap Frame
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::update(float dt) {
+    if (paused) dt = 0.0f;
+    else dt *= timeScale;
+
+    // Rotasi Bumi
+    earthRotAngle += 0.05f * dt;
+    glm::mat4 earthRot = glm::rotate(glm::mat4(1.0f), earthRotAngle, glm::vec3(0,1,0));
+    earth->setWorldTransform(earthRot);
+
+    // Stasiun darat ikut berputar di permukaan Bumi
+    float lat = glm::radians(-2.5f), lon = glm::radians(115.0f);
+    float r = EARTH_RADIUS + 0.05f;
+    glm::vec3 basePos(r*cosf(lat)*sinf(lon), r*sinf(lat), r*cosf(lat)*cosf(lon));
+    groundStationPos = glm::vec3(earthRot * glm::vec4(basePos, 1.0f));
+    // Orientasi: up = normalize(pos), right = cross(Y, up), fwd = cross(up, right)
+
+    // Orbit satelit
+    for (int i = 0; i < orbits.size(); i++) {
+        orbits[i].angle += orbits[i].speed * dt;
+        orbits[i].pos = computeOrbitPos(orbits[i]);
+        // Orientasi nadir: -Z menghadap Bumi
+        glm::vec3 toEarth = glm::normalize(-pos);
+        glm::vec3 right = normalize(cross(up, toEarth));
+        glm::vec3 corrUp = cross(toEarth, right);
+        orient[2] = glm::vec4(-toEarth, 0);  // -Z = sensor menghadap Bumi
+    }
+
+    // Orbit Bulan (inklinasi 5.1°, radius 40 unit)
+    moonOrbitAngle += 0.08f * dt;
+    glm::vec3 moonPos(40*cosf(angle), 40*sinf(angle)*sinf(5.1°), 40*sinf(angle)*cosf(5.1°));
+
+    // Animasi partikel transmisi data (dengan deteksi Line-of-Sight)
+    if (showParticles) {
+        // Ray-sphere intersection: cek apakah jalur satelit→stasiun menembus Bumi
+        float tClosest = glm::dot(-satPos, rayDir);
+        bool hasLoS = (glm::length(closest) > EARTH_RADIUS - 0.1f);
+        if (hasLoS) particleT[s][p] += 0.45f * dt;  // Partikel bergerak
+    }
+}
+```
+Penjelasan:
+Update loop menjalankan seluruh fisika simulasi:
+1. Pause/TimeScale: dt diset 0 jika paused, atau dikalikan timeScale.
+2. Rotasi Bumi: earthRotAngle bertambah 0.05·dt pada sumbu Y.
+3. Stasiun Darat: Konversi lat/lon ke Cartesian, lalu dikalikan earthRot
+   agar ikut berputar di permukaan Bumi.
+4. Satelit: Sudut orbit bertambah sesuai speed. Posisi dihitung dari
+   trigonometri bola. Orientasi nadir = sensor selalu menghadap Bumi.
+5. Bulan: Orbit radius 40, inklinasi 5.1° riil.
+6. Transmisi Data: Ray-sphere intersection mendeteksi apakah Bumi menghalangi
+   jalur satelit→stasiun. Jika tidak, partikel bergerak.
+
+────────────────────────────────────────────────────────────────────
+render() — Menggambar Seluruh Scene
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::render(Shader &shader, const Camera &camera) {
+    shader.bind();
+    shader.setUniformMatrix4fv("u_view", camera.getViewMatrix());
+    shader.setUniformMatrix4fv("u_projection", camera.getProjection());
+    shader.setUniform3f("u_viewPos", camera.getCameraPos());
+    setLights(shader);  // Upload semua cahaya
+
+    // Spot lights (scan beam dari satelit)
+    if (showScanBeam) {
+        for (int i = 0; i < orbits.size(); i++) {
+            glm::vec3 dir = normalize(-orbits[i].pos);
+            // cutOff=8°, outerCutOff=14°, warna cyan (0.4,0.8,1.0)
+        }
+    }
+
+    // Render objek opaque
+    earth->draw(shader);
+    moon->draw(shader);
+    groundStation->draw(shader);
+    for (auto &sat : satellites) sat->draw(shader);
+
+    // Matahari (pure emissive)
+    shader.setUniform3f("u_emissive", 1.4f, 1.1f, 0.45f);
+    sun->draw(shader);
+    shader.setUniform3f("u_emissive", 0, 0, 0);
+
+    // Scan beams semi-transparan (alpha=0.28, kerucut mengarah ke Bumi)
+    // Partikel data downlink (emissive kuning 0.3,0.25,0.0)
+    // Orbit trails (GL_LINE_LOOP, warna per satelit, alpha animasi)
+    // Atmosfer (Fresnel glow, additive blending)
+}
+```
+Penjelasan:
+Urutan rendering sangat penting:
+1. Setup: Bind shader, kirim matriks view/projection dan posisi kamera.
+2. Cahaya: Upload directional + point + spot lights ke shader.
+3. Opaque: Bumi, Bulan, Stasiun, Satelit (depth test normal).
+4. Emissive: Matahari dengan u_emissive override (bersinar sendiri).
+5. Transparan: Scan beams (alpha 0.28), partikel data, orbit trails.
+6. Atmosfer: Additive blending + Fresnel glow (terakhir karena transparan).
+
+────────────────────────────────────────────────────────────────────
+renderMinimap() — Radar Picture-in-Picture
+────────────────────────────────────────────────────────────────────
+```cpp
+void SatelliteScene::renderMinimap(const Camera &camera, int screenW, int screenH) {
+    int mapSize = 160;
+    glViewport(mapX, mapY, mapSize, mapSize);
+    glScissor(mapX, mapY, mapSize, mapSize);
+    glEnable(GL_SCISSOR_TEST);
+
+    // Proyeksi orthographic top-down
+    glm::mat4 ortho = glm::ortho(-25, 25, -25, 25, -100, 100);
+    glm::mat4 topView = glm::lookAt(vec3(0,60,0), vec3(0), vec3(0,0,-1));
+
+    // Render: grid radar, orbit trails, titik satelit, titik stasiun darat
+    // Radar sweep line berputar: sweepAngle = time * 1.5
+}
+```
+Penjelasan:
+Minimap 160x160px di pojok kanan bawah. glScissor membatasi rendering ke
+area kecil. Proyeksi orthographic (tanpa perspektif) + kamera top-down
+menghasilkan tampilan peta 2D. Radar sweep berputar memberikan efek militer.
+
+
+====================================================================
+BAGIAN 11 — MainMenu.cpp
+Antarmuka Menu Utama dengan Bitmap Font
+====================================================================
+
+```cpp
+MainMenu::MainMenu(float screenWidth, float screenHeight)
+    : overlayShader("../res/shaders/overlay.vert", "../res/shaders/overlay.frag"),
+      screenW(screenWidth), screenH(screenHeight), animTime(0.0f)
+{
+    // Setup VAO/VBO untuk background dan teks
+    // initFont(): Bitmap 8x8 → texture atlas 128x48 piksel
+    playBtn = { x, 0.00f, 0.40f, 0.12f, "START" };
+    quitBtn = { x, -0.20f, 0.40f, 0.12f, "QUIT" };
+}
+```
+Penjelasan:
+Menu menggunakan shader overlay terpisah yang menggambar di ruang NDC
+(Normalized Device Coordinates, -1 sampai +1). Font dibuat dari bitmap
+8x8 piksel per karakter yang di-upload ke GPU sebagai texture atlas
+single-channel (GL_R8). Tombol START dan QUIT diposisikan di tengah layar.
+
+────────────────────────────────────────────────────────────────────
+initFont — Membuat Font Atlas dari Bitmap
+────────────────────────────────────────────────────────────────────
+```cpp
+void MainMenu::initFont() {
+    int aw = 16 * 8, ah = 6 * 8;  // 128x48 piksel atlas
+    std::vector<unsigned char> px(aw * ah, 0);
+    for (int c = 0; c < 95; c++) {  // ASCII 32-126
+        int col = c % 16, row = c / 16;
+        for (int y = 0; y < 8; y++) {
+            unsigned char bits = font8x8[c][y];
+            for (int x = 0; x < 8; x++)
+                if (bits & (0x80 >> x))
+                    px[(row*8+y)*aw + col*8+x] = 255;
+        }
+    }
+    // Upload ke GPU sebagai GL_R8 texture
+}
+```
+Penjelasan:
+95 karakter ASCII (spasi sampai tilde) disimpan dalam array font8x8
+masing-masing 8 byte (1 byte = 1 baris, MSB = piksel kiri). Bit-bit
+di-unpack ke texture atlas 128x48, di mana setiap piksel bernilai 0
+(transparan) atau 255 (terisi). Format GL_R8 = 1 byte per piksel.
+
+────────────────────────────────────────────────────────────────────
+render — Menggambar Menu dengan Animasi
+────────────────────────────────────────────────────────────────────
+```cpp
+void MainMenu::render(float time) {
+    glDisable(GL_DEPTH_TEST);
+
+    drawRect(-1, -1, 2, 2, 0, 0, 0.02f, 0.60f);  // Dark overlay
+    
+    float titlePulse = 0.9f + 0.1f * sinf(time * 1.2f);
+    drawTextCentered("SATELLITE SIMULATOR", 0.52f, 5.0f,
+        0.3f*titlePulse, 0.75f*titlePulse, 1.0f*titlePulse);
+
+    // Tombol START dengan glow animasi
+    float pulse = 0.85f + 0.15f * sinf(time * 2.5f);
+    drawRect(border, 0.1f+0.4f*glow, 0.5f+0.3f*glow, 1.0f, alpha*pulse);
+    drawTextCentered(">>> START <<<", ...);
+
+    // Tombol QUIT, controls hint, credits
+}
+```
+Penjelasan:
+Menu dirender di atas scene 3D (depth test off). Dark overlay alpha 0.6
+membuat scene di belakang tetap terlihat. Judul "SATELLITE SIMULATOR"
+berpulsasi via sinf(time*1.2f). Tombol START memiliki efek glow yang
+merespon hover mouse dan berpulsasi. Credits memudar (fade) periodik.
+
+
+====================================================================
+BAGIAN 12 — InfoPanel.cpp
+HUD Informasi Satelit Real-Time
+====================================================================
+
+```cpp
+InfoPanel::InfoPanel(float screenWidth, float screenHeight)
+    : overlayShader("../res/shaders/overlay.vert", "../res/shaders/overlay.frag")
+{
+    // Background: strip horizontal di bawah layar (y: -1.0 ke -0.72)
+    // Text: VAO/VBO dinamis untuk teks berubah-ubah setiap frame
+    initFont();  // Sama seperti MainMenu: bitmap 8x8 → texture atlas
+}
+
+void InfoPanel::render(const std::string &name, const std::string &description) {
+    glDisable(GL_DEPTH_TEST);
+    // Background semi-transparan (0.02, 0.02, 0.06, alpha=0.82)
+    drawBackground(-1.0f, -1.0f, 2.0f, 0.28f);
+    // Judul satelit (kuning, scale 3.0): "Aqua" / "ICESat-2" / "Landsat 8"
+    drawText(name, -0.95f, -0.78f, 3.0f, 1.0f, 0.9f, 0.3f);
+    // Deskripsi (putih-biru, scale 2.0)
+    drawText(description, -0.95f, -0.88f, 2.0f, 0.85f, 0.85f, 0.9f);
+    glEnable(GL_DEPTH_TEST);
+}
+```
+Penjelasan:
+Panel info muncul di 28% bawah layar saat satelit dipilih (tombol 1-3).
+Background gelap semi-transparan agar teks terbaca di atas scene 3D.
+Nama satelit berwarna kuning dan deskripsi berwarna biru-putih lembut.
+Font yang sama (bitmap 8x8) digunakan, dengan scaling berbeda untuk
+judul (3x) vs deskripsi (2x).
+
+
+====================================================================
+BAGIAN 13 — main.cpp
+Titik Masuk Aplikasi dan Game Loop
+====================================================================
+
+────────────────────────────────────────────────────────────────────
+Inisialisasi
+────────────────────────────────────────────────────────────────────
+```cpp
+int main() {
+    Window window;
+    enableDebugging();
+    Camera camera(window);
+    glfwSetWindowUserPointer(window.getWindow(), &camera);
+    glfwSetCursorPosCallback(window.getWindow(), Camera::mouse_callback);
+    glfwSetScrollCallback(window.getWindow(), Camera::scroll_callback);
+
+    Shader phongShader("../res/shaders/phong.vert", "../res/shaders/phong.frag");
+    SatelliteScene scene;
+    MainMenu mainMenu(WIN_WIDTH, WIN_HEIGHT);
+    InfoPanel infoPanel(WIN_WIDTH, WIN_HEIGHT);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_MULTISAMPLE);
+    glClearColor(0.0f, 0.0f, 0.02f, 1.0f);
+
+    bool inMenu = true;
+    int selectedSat = -1;
+}
+```
+Penjelasan:
+- Window + Camera dibuat, callback mouse/scroll didaftarkan.
+- glfwSetWindowUserPointer menyimpan pointer Camera agar callback
+  statis bisa mengakses instance Camera.
+- Shader Phong, Scene, Menu, InfoPanel diinisialisasi.
+- GL_DEPTH_TEST: Objek di depan menutupi objek di belakang.
+- GL_BLEND + SRC_ALPHA: Transparansi bekerja (scan beam, atmosfer).
+- GL_MULTISAMPLE: Anti-aliasing 4x dari Window hint.
+- ClearColor biru tua gelap (0, 0, 0.02) untuk luar angkasa.
+
+────────────────────────────────────────────────────────────────────
+Game Loop — Input Handling
+────────────────────────────────────────────────────────────────────
+```cpp
+while (!glfwWindowShouldClose(window.getWindow())) {
+    glfwPollEvents();
+    float time = glfwGetTime();
+
+    if (inMenu) {
+        mainMenu.update(dt, mouseX, mouseY);
+        if (mouseClicked) {
+            MenuAction action = mainMenu.handleClick(mouseX, mouseY);
+            if (action == MENU_PLAY) {
+                inMenu = false;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            }
+            if (action == MENU_QUIT) glfwSetWindowShouldClose(window, true);
+        }
+    } else {
+        // Toggle fitur via keyboard
+        if (F_pressed) scene.toggleScanBeam();
+        if (T_pressed) scene.toggleParticles();
+        if (O_pressed) scene.toggleOrbits();
+        if (P_pressed) scene.togglePaused();
+        if (R_pressed) { camera.resetToEarthView(); camera.setFreeMode(); selectedSat = -1; }
+        if (PLUS)  scene.adjustTimeScale(+0.5f);
+        if (MINUS) scene.adjustTimeScale(-0.5f);
+        if (key_1) { selectedSat = 0; camera.setChaseCamTarget(pos, front); }
+        if (key_2) { selectedSat = 1; ... }
+        if (key_3) { selectedSat = 2; ... }
+        if (ESC) { glfwSetInputMode(CURSOR_NORMAL); inMenu = true; }
+    }
+```
+Penjelasan:
+Game loop berjalan sampai jendela ditutup. Di menu: mouse visible, 
+klik START/QUIT. Di simulasi: cursor hidden untuk FPS-style control.
+Tombol toggle: F=scan beam, T=transmisi data, O=orbit trails, P=pause,
+R=reset kamera. +/- mengatur time scale. 1-3 memilih satelit dan
+mengaktifkan chase camera. ESC kembali ke menu.
+
+────────────────────────────────────────────────────────────────────
+Game Loop — Rendering
+────────────────────────────────────────────────────────────────────
+```cpp
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    camera.processKeyboardInput(window.getWindow());
+
+    if (inMenu) {
+        // Render scene sebagai background + overlay menu
+        scene.update(dt);
+        scene.getStarfield().render(camera, time);
+        scene.render(phongShader, camera);
+        mainMenu.render(time);
+    } else {
+        scene.update(dt);
+        scene.getStarfield().render(camera, time);
+        scene.render(phongShader, camera);
+        scene.renderMinimap(camera, WIN_WIDTH, WIN_HEIGHT);
+        if (selectedSat >= 0)
+            infoPanel.render(satName, satDescription);
+    }
+
+    glfwSwapBuffers(window.getWindow());
+}
+```
+Penjelasan:
+1. glClear: Bersihkan framebuffer (warna + depth).
+2. Camera: Proses input keyboard untuk pergerakan.
+3. Scene: Update fisika → render bintang → render 3D → minimap.
+4. Menu/InfoPanel: Dirender terakhir di atas scene (overlay).
+5. glfwSwapBuffers: Tukar front/back buffer (double buffering).
+   Mencegah flicker — user melihat buffer selesai, GPU menggambar
+   di buffer tersembunyi.
+
+
+====================================================================
+BAGIAN 14 — Shader Files
+Semua Program Shader GLSL (GPU)
+====================================================================
+
+────────────────────────────────────────────────────────────────────
+14A. phong.vert — Vertex Shader Utama
+────────────────────────────────────────────────────────────────────
+```glsl
+#version 460 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoord;
+
+uniform mat4 u_model, u_view, u_projection;
+uniform mat3 u_normalMatrix;
+
+out vec3 FragPos, Normal;
+out vec2 TexCoord;
+
+void main() {
+    FragPos = vec3(u_model * vec4(aPos, 1.0));
+    Normal = normalize(u_normalMatrix * aNormal);
+    TexCoord = aTexCoord;
+    gl_Position = u_projection * u_view * vec4(FragPos, 1.0);
+}
+```
+Penjelasan:
+Vertex shader berjalan per-vertex. Input: posisi/normal/UV dari VAO.
+FragPos = posisi dunia (untuk kalkulasi jarak cahaya). Normal ditransformasi
+dengan normalMatrix (bukan model matrix) agar tetap tegak lurus.
+gl_Position = MVP projection untuk rasterisasi di layar.
+
+────────────────────────────────────────────────────────────────────
+14B. phong.frag — Fragment Shader Pencahayaan Blinn-Phong
+────────────────────────────────────────────────────────────────────
+```glsl
+// Directional Light (Matahari)
+vec3 calcDirLight(DirLightData light, vec3 normal, vec3 viewDir, vec3 baseDiffuse) {
+    vec3 lightDir = normalize(-light.direction);
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 halfwayDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfwayDir), 0.0), material.shininess);
+    return (light.ambient * material.ambient)
+         + (light.diffuse * diff * baseDiffuse)
+         + (light.specular * spec * material.specular);
+}
+
+// Point Light (Fill + Bulan)
+vec3 calcPointLight(PointLightData light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 baseDiffuse) {
+    float distance = length(light.position - fragPos);
+    float attenuation = 1.0 / (light.constant + light.linear*distance + light.quadratic*distance*distance);
+    // ... same Blinn-Phong * attenuation ...
+}
+
+// Spot Light (Scan Beam)
+vec3 calcSpotLight(SpotLightData light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 baseDiffuse) {
+    float theta = dot(lightDir, normalize(-light.direction));
+    float epsilon = light.cutOff - light.outerCutOff;
+    float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
+    // ... Blinn-Phong * attenuation * intensity ...
+}
+
+void main() {
+    vec3 baseDiffuse = (u_useTexture == 1) ? texture(u_texture, TexCoord).rgb : material.diffuse;
+    vec3 result = calcDirLight(...) + calcPointLight(0,...) + calcPointLight(1,...);
+    for (int i = 0; i < numSpotLights; i++) result += calcSpotLight(i,...);
+    result += u_emissive * baseDiffuse;  // Emissive override (matahari)
+    FragColor = vec4(result, u_alpha);
+}
+```
+Penjelasan:
+Fragment shader berjalan per-piksel. Menghitung pencahayaan Blinn-Phong:
+- Ambient: cahaya konstan minimum (bayangan tidak 100% hitam).
+- Diffuse: dot(normal, lightDir) = sudut datang → intensitas. max(,0)
+  memastikan sisi belakang tidak negatif.
+- Specular: Blinn-Phong menggunakan halfway vector (bukan reflection).
+  pow(dot, shininess) menciptakan titik kilau. Shininess tinggi = kilau kecil tajam.
+- Attenuation (Point/Spot): 1/(c + l·d + q·d²) melemahkan cahaya seiring jarak.
+- Spot intensity: theta < cutOff = di luar kerucut = 0. Interpolasi halus
+  antara inner dan outer cutoff.
+- Emissive: bypass semua kalkulasi cahaya (matahari bersinar sendiri).
+
+────────────────────────────────────────────────────────────────────
+14C. atmosphere.frag — Efek Atmosfer Bumi (Fresnel Glow)
+────────────────────────────────────────────────────────────────────
+```glsl
+void main() {
+    vec3 viewDir = normalize(u_viewPos - FragPos);
+    float fresnel = 1.0 - abs(dot(Normal, viewDir));  // 0=center, 1=edge
+    fresnel = pow(fresnel, 3.0);
+
+    vec3 sunDir = normalize(-u_sunDirection);
+    float sunDot = max(dot(Normal, sunDir), 0.0);
+    float dayFactor = smoothstep(0.0, 0.3, sunDot);
+
+    vec3 dayColor = vec3(0.3, 0.6, 1.0);    // biru langit
+    vec3 nightColor = vec3(0.02, 0.05, 0.15); // biru gelap
+    vec3 color = mix(nightColor, dayColor, dayFactor);
+
+    FragColor = vec4(color, fresnel * (0.4 + 0.6 * dayFactor));
+}
+```
+Penjelasan:
+Atmosfer = bola transparan sedikit lebih besar dari Bumi. Fresnel effect:
+tepi bola (sudut pandang rendah terhadap normal) lebih terang = efek
+cahaya atmosfer di horizon. pow(fresnel, 3.0) = tajam di tepi saja.
+Sisi siang (menghadap matahari) = biru terang, sisi malam = biru gelap.
+smoothstep menghaluskan transisi siang/malam. Additive blending di
+rendering membuat atmosfer bercahaya tanpa menutupi detail Bumi.
+
+────────────────────────────────────────────────────────────────────
+14D. starfield.vert + starfield.frag — Bintang Berkedip
+────────────────────────────────────────────────────────────────────
+```glsl
+// Vertex: Kedip dan ukuran dinamis
+float twinkle = 0.6 + 0.4 * sin(u_time * 1.5 + aBrightness * 31.415);
+vBrightness = aBrightness * twinkle;
+gl_PointSize = aSize * (1.0 + 0.3 * sin(u_time * 2.0 + aBrightness * 17.3));
+
+// Fragment: Bentuk bulat, warna spektral, gradien glow
+vec2 coord = gl_PointCoord - vec2(0.5);
+if (length(coord) > 0.5) discard;
+float alpha = smoothstep(0.5, 0.1, length(coord));
+vec3 color = mix(vec3(0.7,0.8,1.0), vec3(1.0,0.9,0.7), vBrightness);
+FragColor = vec4(color * vBrightness, alpha * vBrightness);
+```
+Penjelasan:
+Setiap bintang berkedip pada fase berbeda (31.415 sebagai offset irasional).
+gl_PointCoord mengubah titik persegi GPU → lingkaran via discard.
+smoothstep = gradien glow dari pusat ke tepi. Bintang redup = biru (panas),
+bintang terang = kuning (dingin) — sesuai diagram Hertzsprung-Russell.
+
+────────────────────────────────────────────────────────────────────
+14E. orbit_line.vert + orbit_line.frag — Garis Orbit
+────────────────────────────────────────────────────────────────────
+```glsl
+// Vertex: transformasi sederhana tanpa model matrix
+gl_Position = u_projection * u_view * vec4(aPos, 1.0);
+// Fragment: warna solid dari uniform
+FragColor = u_color;
+```
+Penjelasan:
+Shader paling sederhana: hanya transformasi posisi dan warna solid.
+Digunakan untuk menggambar GL_LINE_LOOP orbit satelit dan grid radar minimap.
+
+────────────────────────────────────────────────────────────────────
+14F. overlay.vert + overlay.frag — UI 2D (Menu & HUD)
+────────────────────────────────────────────────────────────────────
+```glsl
+// Vertex: Pass-through posisi NDC (tanpa matriks transformasi)
+gl_Position = vec4(aPos, 0.0, 1.0);
+
+// Fragment: Font atlas atau warna solid
+if (u_useTexture == 1) {
+    float alpha = texture(u_fontAtlas, TexCoord).r;
+    if (alpha < 0.1) discard;
+    FragColor = vec4(u_color.rgb, u_color.a * alpha);
+} else {
+    FragColor = u_color;
+}
+```
+Penjelasan:
+Overlay shader bekerja di ruang NDC langsung (-1 ke +1). Tidak ada
+matriks transformasi karena posisi UI sudah dalam koordinat layar.
+Untuk teks: texture atlas single-channel (R8) disampling, piksel
+dengan alpha < 0.1 di-discard (transparan). Untuk background: warna
+solid dari uniform u_color. Depth test dimatikan agar UI selalu
+muncul di atas scene 3D.
+
+
+====================================================================
+PENUTUP — Rangkuman Arsitektur Proyek
+====================================================================
+
+Alur eksekusi lengkap dari klik pertama hingga rendering:
+
+main() → Window() → gladLoadGL → enableDebugging()
+       → Camera() → Shader("phong") → SatelliteScene()
+            → buildEarth() → loadModel() → upload VAO/VBO
+            → buildSun() → createSphere() → loadTexture()
+            → buildMoon() → loadModel()
+            → buildSatellites() → loadGLBColored()
+            → buildGroundStation() → loadModel()
+       → MainMenu() → initFont() → bitmap → GPU
+       → InfoPanel() → initFont()
+
+Game Loop (60 FPS):
+  glfwPollEvents() → processKeyboardInput() → update(dt)
+    → earthRotAngle += 0.05*dt
+    → computeOrbitPos() per satelit
+    → moonOrbit += 0.08*dt
+    → particleT += 0.45*dt (jika LoS)
+  → glClear()
+  → starfield.render() → GL_POINTS + twinkle shader
+  → scene.render()
+    → setLights() → dirLight + pointLights + spotLights
+    → earth.draw() → phong.frag → Blinn-Phong lighting
+    → sun.draw() → u_emissive override
+    → satellites.draw() → nadir orientation
+    → scanBeams → alpha 0.28 cone
+    → particles → emissive yellow
+    → orbits → GL_LINE_LOOP
+    → atmosphere → Fresnel + additive blend
+  → renderMinimap() → orthographic + radar sweep
+  → infoPanel.render() → overlay shader + bitmap font
+  → glfwSwapBuffers() → tampilkan ke layar
+
+Total file: 14 file C++ + 10 file GLSL shader
+Total baris kode: ~2800 baris
+Library: GLFW, GLAD, GLM, Assimp, stb_image
+
+
